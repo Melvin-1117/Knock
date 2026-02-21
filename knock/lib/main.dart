@@ -79,6 +79,35 @@ String _generateUserId() {
   return 'KNCK-$code';
 }
 
+String _formatTimestamp(DateTime? dt) {
+  if (dt == null) return '';
+  final now = DateTime.now();
+  final diff = now.difference(dt);
+  if (diff.inDays > 0) return '${diff.inDays}d';
+  if (diff.inHours > 0) return '${diff.inHours}h';
+  if (diff.inMinutes > 0) return '${diff.inMinutes}m';
+  return 'now';
+}
+
+// ---------------------------------------------------------------------------
+// Knock relationship data
+// ---------------------------------------------------------------------------
+
+class KnockRelationship {
+  KnockRelationship({
+    required this.friendId,
+    this.myCustomKnockText,
+    this.theirCustomKnockText,
+    this.isInitial = true,
+    this.knockHistory = const [],
+  });
+  final String friendId;
+  final String? myCustomKnockText;
+  final String? theirCustomKnockText;
+  bool isInitial;
+  List<Map<String, dynamic>> knockHistory;
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -104,14 +133,14 @@ class KnockApp extends StatelessWidget {
         useMaterial3: true,
         brightness: Brightness.light,
         colorSchemeSeed: _primaryColor,
-        scaffoldBackgroundColor: const Color(0xFFF5F5F7),
+        scaffoldBackgroundColor: const Color(0xFFE8E8E8),
         appBarTheme: const AppBarTheme(
-          backgroundColor: Colors.white,
+          backgroundColor: Color(0xFF517DA2),
           elevation: 0,
           scrolledUnderElevation: 1,
-          iconTheme: IconThemeData(color: Color(0xFF333333)),
+          iconTheme: IconThemeData(color: Colors.white),
           titleTextStyle: TextStyle(
-            color: Color(0xFF1A1A1A),
+            color: Colors.white,
             fontWeight: FontWeight.w900,
             letterSpacing: 4,
             fontSize: 22,
@@ -949,8 +978,67 @@ class _HomeScreenState extends State<HomeScreen> {
           )
           .eq('user_id', uid);
 
+      final friendList = List<Map<String, dynamic>>.from(rows);
+      final friendIds = friendList.map((f) => f['friend_id'] as String).toList();
+
+      Map<String, Map<String, dynamic>> lastKnockByFriend = {};
+      if (friendIds.isNotEmpty) {
+        try {
+          final sent = await _sb
+              .from('knocks')
+              .select('receiver_id, message, created_at')
+              .eq('sender_id', uid)
+              .in_('receiver_id', friendIds)
+              .order('created_at', ascending: false)
+              .limit(100);
+          final received = await _sb
+              .from('knocks')
+              .select('sender_id, message, created_at')
+              .eq('receiver_id', uid)
+              .in_('sender_id', friendIds)
+              .order('created_at', ascending: false)
+              .limit(100);
+
+          for (final k in sent) {
+            final fid = k['receiver_id'] as String;
+            if (!lastKnockByFriend.containsKey(fid)) {
+              lastKnockByFriend[fid] = {
+                'message': k['message'],
+                'created_at': k['created_at'],
+                'is_from_me': true,
+              };
+            }
+          }
+          for (final k in received) {
+            final fid = k['sender_id'] as String;
+            final existing = lastKnockByFriend[fid];
+            final createdAt = DateTime.tryParse(k['created_at'] as String? ?? '');
+            final existingAt = existing != null
+                ? DateTime.tryParse(existing['created_at'] as String? ?? '')
+                : null;
+            if (existing == null ||
+                (createdAt != null &&
+                    existingAt != null &&
+                    createdAt.isAfter(existingAt))) {
+              lastKnockByFriend[fid] = {
+                'message': k['message'],
+                'created_at': k['created_at'],
+                'is_from_me': false,
+              };
+            }
+          }
+        } catch (_) {}
+      }
+
+      for (final f in friendList) {
+        final fid = f['friend_id'] as String;
+        final last = lastKnockByFriend[fid];
+        f['last_message'] = last?['message'];
+        f['last_message_at'] = last?['created_at'];
+      }
+
       setState(() {
-        _friends = List<Map<String, dynamic>>.from(rows);
+        _friends = friendList;
         _loading = false;
       });
     } catch (e) {
@@ -1154,13 +1242,13 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         automaticallyImplyLeading: false,
         titleSpacing: 16,
-        title: Text(
+        title: const Text(
           'KNOCK',
           style: TextStyle(
             fontWeight: FontWeight.w900,
             letterSpacing: 4,
             fontSize: 20,
-            color: _primaryColor,
+            color: Colors.white,
           ),
         ),
         actions: [
@@ -1180,7 +1268,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w700,
-                          color: Color(0xFF1A1A1A),
+                          color: Colors.white,
                         ),
                       ),
                       if (_myKnockId != null)
@@ -1189,7 +1277,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w600,
-                            color: Colors.grey[500],
+                            color: Colors.white.withValues(alpha: 0.85),
                             letterSpacing: 1,
                           ),
                         ),
@@ -1198,13 +1286,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   const SizedBox(width: 10),
                   CircleAvatar(
                     radius: 18,
-                    backgroundColor: _primaryColor.withValues(alpha: 0.12),
+                    backgroundColor: Colors.white.withValues(alpha: 0.25),
                     child: Text(
                       _myAvatarEmoji ?? displayInitial,
                       style: TextStyle(
                         fontSize: _myAvatarEmoji != null ? 20 : 16,
                         fontWeight: FontWeight.bold,
-                        color: _primaryColor,
+                        color: const Color(0xFF517DA2),
                       ),
                     ),
                   ),
@@ -1246,12 +1334,19 @@ class _HomeScreenState extends State<HomeScreen> {
                   final label = f['label'] ?? 'Friend';
                   final friendId = f['friend_id'] as String;
                   final color = _colorForIndex(index);
+                  final lastMsg = f['last_message'] as String?;
+                  final lastAtStr = f['last_message_at'] as String?;
+                  final lastAt = lastAtStr != null
+                      ? DateTime.tryParse(lastAtStr)
+                      : null;
 
                   return _FriendCard(
                     name: name,
                     label: label,
                     friendId: friendId,
                     accentColor: color,
+                    lastMessage: lastMsg,
+                    lastMessageAt: lastAt,
                   );
                 },
               ),
@@ -1750,15 +1845,22 @@ class _FriendCard extends StatelessWidget {
     required this.label,
     required this.friendId,
     required this.accentColor,
+    this.lastMessage,
+    this.lastMessageAt,
   });
 
   final String name;
   final String label;
   final String friendId;
   final Color accentColor;
+  final String? lastMessage;
+  final DateTime? lastMessageAt;
 
   @override
   Widget build(BuildContext context) {
+    final subtitle = lastMessage != null && lastMessage!.isNotEmpty
+        ? lastMessage!
+        : label;
     return GestureDetector(
       onTap: () {
         Navigator.of(context).push(
@@ -1818,12 +1920,25 @@ class _FriendCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    label,
-                    style: TextStyle(fontSize: 13, color: Colors.grey[500]),
+                    subtitle,
+                    style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ],
               ),
             ),
+            if (lastMessageAt != null)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Text(
+                  _formatTimestamp(lastMessageAt),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey[500],
+                  ),
+                ),
+              ),
             Icon(Icons.chevron_right_rounded, color: Colors.grey[400]),
           ],
         ),
@@ -1856,6 +1971,128 @@ class UserDetailScreen extends StatefulWidget {
 
 class _UserDetailScreenState extends State<UserDetailScreen> {
   String? _sentMessage;
+  List<Map<String, dynamic>> _knockHistory = [];
+  String? _customText;
+  bool _loadingConnection = true;
+  bool _savingCustom = false;
+  bool _showCustomField = false;
+  final _customTextC = TextEditingController();
+
+  static const _chatBg = Color(0xFFE3EFF3);
+  static const _senderBubble = Color(0xFFEFFDDE);
+  static const _receiverBubble = Colors.white;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadConnectionAndHistory();
+  }
+
+  @override
+  void dispose() {
+    _customTextC.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadConnectionAndHistory() async {
+    final uid = _uid;
+    if (uid == null) {
+      setState(() => _loadingConnection = false);
+      return;
+    }
+    try {
+      Map<String, dynamic>? conn;
+      try {
+        conn = await _sb
+            .from('connections')
+            .select('custom_text')
+            .eq('user_id', uid)
+            .eq('friend_id', widget.friendId)
+            .maybeSingle();
+      } catch (_) {
+        conn = null;
+      }
+
+      final sent = await _sb
+          .from('knocks')
+          .select('message, created_at')
+          .eq('sender_id', uid)
+          .eq('receiver_id', widget.friendId)
+          .order('created_at', ascending: true);
+      final received = await _sb
+          .from('knocks')
+          .select('message, created_at')
+          .eq('sender_id', widget.friendId)
+          .eq('receiver_id', uid)
+          .order('created_at', ascending: true);
+
+      final List<Map<String, dynamic>> combined = [];
+      int si = 0, ri = 0;
+      while (si < sent.length || ri < received.length) {
+        final st = si < sent.length
+            ? DateTime.tryParse(sent[si]['created_at'] as String? ?? '')
+            : null;
+        final rt = ri < received.length
+            ? DateTime.tryParse(received[ri]['created_at'] as String? ?? '')
+            : null;
+        if (st != null && (rt == null || st.isBefore(rt))) {
+          combined.add({...sent[si], 'is_from_me': true});
+          si++;
+        } else if (rt != null) {
+          combined.add({...received[ri], 'is_from_me': false});
+          ri++;
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _customText = conn != null ? conn['custom_text'] as String? : null;
+          if (_customText != null && _customText!.isNotEmpty) {
+            _customTextC.text = _customText!;
+          }
+          _knockHistory = combined;
+          _loadingConnection = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Load connection error: $e');
+      if (mounted) {
+        setState(() => _loadingConnection = false);
+      }
+    }
+  }
+
+  Future<void> _saveCustomText() async {
+    final text = _customTextC.text.trim();
+    if (text.isEmpty) return;
+    final uid = _uid;
+    if (uid == null) return;
+
+    setState(() => _savingCustom = true);
+    try {
+      await _sb
+          .from('connections')
+          .update({'custom_text': text})
+          .eq('user_id', uid)
+          .eq('friend_id', widget.friendId);
+
+      if (mounted) {
+        setState(() {
+          _customText = text;
+          _showCustomField = false;
+          _savingCustom = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Save custom text error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save: $e')),
+        );
+        setState(() => _savingCustom = false);
+      }
+    }
+  }
 
   Future<void> _sendMessage(String message) async {
     HapticFeedback.heavyImpact();
@@ -1867,6 +2104,15 @@ class _UserDetailScreenState extends State<UserDetailScreen> {
         'receiver_id': widget.friendId,
         'message': message,
       });
+      final createdAt = DateTime.now().toIso8601String();
+      if (mounted) {
+        setState(() {
+          _knockHistory = [
+            ..._knockHistory,
+            {'message': message, 'created_at': createdAt, 'is_from_me': true},
+          ];
+        });
+      }
       debugPrint('Knock sent to ${widget.name}: $message');
     } catch (e) {
       debugPrint('Send error: $e');
@@ -1882,104 +2128,251 @@ class _UserDetailScreenState extends State<UserDetailScreen> {
     });
   }
 
+  bool get _hasCustomText =>
+      _customText != null && _customText!.trim().isNotEmpty;
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: _chatBg,
       appBar: AppBar(
         title: Text(
           widget.name,
-          style: const TextStyle(fontWeight: FontWeight.w700),
+          style: const TextStyle(
+            fontWeight: FontWeight.w700,
+            color: Colors.white,
+          ),
         ),
         centerTitle: true,
       ),
-      body: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-        child: Column(
-          children: [
-            CircleAvatar(
-              radius: 44,
-              backgroundColor: widget.accentColor.withValues(alpha: 0.12),
-              child: Text(
-                widget.name.isNotEmpty ? widget.name[0].toUpperCase() : '?',
-                style: TextStyle(
-                  fontSize: 36,
-                  fontWeight: FontWeight.bold,
-                  color: widget.accentColor,
-                ),
-              ),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              widget.name,
-              style: const TextStyle(
-                fontSize: 26,
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF1A1A1A),
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              widget.label,
-              style: TextStyle(fontSize: 14, color: Colors.grey[500]),
-            ),
-            const SizedBox(height: 32),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                'SEND A KNOCK',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 2,
-                  color: Colors.grey[500],
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Expanded(
-              child: GridView.count(
-                crossAxisCount: 2,
-                mainAxisSpacing: 12,
-                crossAxisSpacing: 12,
-                childAspectRatio: 2.6,
-                children: _defaultQuickMessages.map((msg) {
-                  final isSent = _sentMessage == msg;
-                  return _QuickMessageButton(
-                    message: msg,
-                    accentColor: widget.accentColor,
-                    isSent: isSent,
-                    onTap: () => _sendMessage(msg),
-                  );
-                }).toList(),
-              ),
-            ),
-            AnimatedOpacity(
-              opacity: _sentMessage != null ? 1.0 : 0.0,
-              duration: const Duration(milliseconds: 300),
-              child: Padding(
-                padding: const EdgeInsets.only(bottom: 16),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.check_circle_rounded,
-                      color: widget.accentColor,
-                      size: 20,
+      body: _loadingConnection
+          ? const Center(child: CircularProgressIndicator(color: Color(0xFF517DA2)))
+          : Column(
+              children: [
+                Expanded(
+                  child: ListView.builder(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
                     ),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Knock sent!',
-                      style: TextStyle(
-                        color: widget.accentColor,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
+                    itemCount: _knockHistory.length,
+                    itemBuilder: (context, i) {
+                      final k = _knockHistory[i];
+                      final isMe = k['is_from_me'] as bool? ?? false;
+                      return Align(
+                        alignment:
+                            isMe ? Alignment.centerRight : Alignment.centerLeft,
+                        child: Container(
+                          margin: EdgeInsets.only(
+                            bottom: 8,
+                            left: isMe ? 64 : 0,
+                            right: isMe ? 0 : 64,
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 10,
+                          ),
+                          decoration: BoxDecoration(
+                            color: isMe ? _senderBubble : _receiverBubble,
+                            borderRadius: BorderRadius.only(
+                              topLeft: const Radius.circular(18),
+                              topRight: const Radius.circular(18),
+                              bottomLeft: Radius.circular(isMe ? 18 : 4),
+                              bottomRight: Radius.circular(isMe ? 4 : 18),
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.06),
+                                blurRadius: 6,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: Text(
+                            k['message'] as String? ?? '',
+                            style: TextStyle(
+                              fontSize: 15,
+                              color: Colors.grey[800],
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
                 ),
-              ),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  color: _chatBg,
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 300),
+                    child: _hasCustomText
+                        ? _buildQuickMessageGrid()
+                        : _buildSetCustomKnockSection(),
+                  ),
+                ),
+                AnimatedOpacity(
+                  opacity: _sentMessage != null ? 1.0 : 0.0,
+                  duration: const Duration(milliseconds: 300),
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.check_circle_rounded,
+                          color: widget.accentColor,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Knock sent!',
+                          style: TextStyle(
+                            color: widget.accentColor,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+    );
+  }
+
+  Widget _buildSetCustomKnockSection() {
+    if (_showCustomField) {
+      return Container(
+        key: const ValueKey('custom_field'),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.06),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
             ),
           ],
         ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _customTextC,
+              autofocus: true,
+              decoration: InputDecoration(
+                hintText: "e.g. Yo, it's Melvin!",
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+                filled: true,
+                fillColor: const Color(0xFFF5F5F7),
+              ),
+              maxLength: 100,
+              onSubmitted: (_) => _saveCustomText(),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: _savingCustom
+                      ? null
+                      : () => setState(() => _showCustomField = false),
+                  child: const Text('Cancel'),
+                ),
+                const SizedBox(width: 8),
+                ElevatedButton(
+                  onPressed: _savingCustom ? null : _saveCustomText,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF517DA2),
+                    foregroundColor: Colors.white,
+                  ),
+                  child: _savingCustom
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Text('Save'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+    }
+    return Center(
+      key: const ValueKey('set_button'),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Material(
+          color: const Color(0xFF517DA2),
+          borderRadius: BorderRadius.circular(16),
+          child: InkWell(
+            onTap: () => setState(() => _showCustomField = true),
+            borderRadius: BorderRadius.circular(16),
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 32,
+                vertical: 16,
+              ),
+              child: const Text(
+                'Set Your Custom Knock',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildQuickMessageGrid() {
+    return Container(
+      key: const ValueKey('grid'),
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'SEND A KNOCK',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 2,
+              color: Colors.grey[600],
+            ),
+          ),
+          const SizedBox(height: 12),
+          GridView.count(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            crossAxisCount: 2,
+            mainAxisSpacing: 12,
+            crossAxisSpacing: 12,
+            childAspectRatio: 2.6,
+            children: _defaultQuickMessages.map((msg) {
+              final isSent = _sentMessage == msg;
+              return _QuickMessageButton(
+                message: msg,
+                accentColor: widget.accentColor,
+                isSent: isSent,
+                onTap: () => _sendMessage(msg),
+              );
+            }).toList(),
+          ),
+        ],
       ),
     );
   }
