@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -11,19 +11,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 const _supabaseUrl = 'https://ovpxeuowzwjrvhkulldr.supabase.co';
 const _supabaseAnonKey =
     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92cHhldW93endqcnZoa3VsbGRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEzNDI0ODEsImV4cCI6MjA4NjkxODQ4MX0.obWpaemtnKatOmDVveR5xczThnjMi3l9QECE_Qu7H_k';
-
-const _defaultQuickMessages = [
-  '\u{1F44B} Hey!',
-  '\u{1F355} Wanna grab food?',
-  "\u{1F3AE} Let's play!",
-  '\u{1F4DE} Call me',
-  '\u{1F602} LOL',
-  '\u{2764}\u{FE0F} Miss you',
-  '\u{2615} Coffee break?',
-  '\u{1F3E0} Coming home?',
-  '\u{1F4AA} You got this!',
-  '\u{1FAC2} Sending hugs',
-];
 
 const _accentColors = [
   Color(0xFF1E88E5),
@@ -131,11 +118,16 @@ class KnockApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
-        brightness: Brightness.light,
-        colorSchemeSeed: _primaryColor,
-        scaffoldBackgroundColor: const Color(0xFFE8E8E8),
+        brightness: Brightness.dark,
+        // Only set colorScheme, not colorSchemeSeed, to avoid assertion error
+        scaffoldBackgroundColor: const Color(0xFF000000),
+        colorScheme: ColorScheme.dark(
+          primary: _primaryColor,
+          surface: const Color(0xFF1A1A1A),
+          onSurface: Colors.white,
+        ),
         appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFF517DA2),
+          backgroundColor: Color(0xFF000000),
           elevation: 0,
           scrolledUnderElevation: 1,
           iconTheme: IconThemeData(color: Colors.white),
@@ -175,18 +167,19 @@ class _KnockLogoPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final w = size.width;
     final h = size.height;
+    final cx = w * 0.5;
 
-    // Simple black heart shape
+    // Symmetrical heart: bottom point, two rounded lobes at top
     final path = Path();
-    path.moveTo(w * 0.5, h * 0.9);
-    path.cubicTo(w * 0.1, h * 0.55, w * 0.1, h * 0.15, w * 0.5, h * 0.35);
-    path.cubicTo(w * 0.9, h * 0.15, w * 0.9, h * 0.55, w * 0.5, h * 0.9);
+    path.moveTo(cx, h * 0.88);
+    path.cubicTo(cx - w * 0.5, h * 0.5, cx - w * 0.5, h * 0.05, cx, h * 0.3);
+    path.cubicTo(cx + w * 0.5, h * 0.05, cx + w * 0.5, h * 0.5, cx, h * 0.88);
     path.close();
 
     canvas.drawPath(
       path,
       Paint()
-        ..color = Colors.black
+        ..color = Colors.white
         ..style = PaintingStyle.fill,
     );
   }
@@ -272,7 +265,7 @@ class _SplashScreenState extends State<SplashScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: const Color(0xFF000000),
       body: Center(
         child: FadeTransition(
           opacity: _fadeIn,
@@ -290,7 +283,7 @@ class _SplashScreenState extends State<SplashScreen>
                     fontSize: 36,
                     fontWeight: FontWeight.w900,
                     letterSpacing: 8,
-                    color: Color(0xFF1A1A1A),
+                    color: Colors.white,
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -298,7 +291,7 @@ class _SplashScreenState extends State<SplashScreen>
                   'Tap into your circle',
                   style: TextStyle(
                     fontSize: 15,
-                    color: Colors.grey[500],
+                    color: Colors.grey[400],
                     letterSpacing: 1,
                   ),
                 ),
@@ -516,7 +509,7 @@ class _SetupScreenState extends State<SetupScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: const Color(0xFF000000),
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -547,13 +540,13 @@ class _SetupScreenState extends State<SetupScreen> {
           style: TextStyle(
             fontSize: 28,
             fontWeight: FontWeight.w900,
-            color: Color(0xFF1A1A1A),
+            color: Colors.white,
           ),
         ),
         const SizedBox(height: 8),
         Text(
           'Pick a username to get started',
-          style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+          style: TextStyle(fontSize: 16, color: Colors.grey[400]),
         ),
         const SizedBox(height: 36),
         TextField(
@@ -563,24 +556,24 @@ class _SetupScreenState extends State<SetupScreen> {
           style: const TextStyle(
             fontSize: 18,
             fontWeight: FontWeight.w600,
-            color: Color(0xFF1A1A1A),
+            color: Colors.white,
           ),
           decoration: InputDecoration(
             hintText: 'Your name',
             hintStyle: TextStyle(
-              color: Colors.grey[400],
+              color: Colors.grey[500],
               fontWeight: FontWeight.normal,
             ),
             filled: true,
-            fillColor: const Color(0xFFF5F5F7),
-            prefixIcon: Icon(Icons.person_outline, color: Colors.grey[500]),
+            fillColor: const Color(0xFF121212),
+            prefixIcon: Icon(Icons.person_outline, color: Colors.grey[400]),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(16),
-              borderSide: BorderSide(color: Colors.grey[300]!),
+              borderSide: BorderSide(color: Colors.grey[700]!),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(16),
-              borderSide: BorderSide(color: Colors.grey[300]!),
+              borderSide: BorderSide(color: Colors.grey[700]!),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(16),
@@ -642,7 +635,7 @@ class _SetupScreenState extends State<SetupScreen> {
         // Preview avatar
         CircleAvatar(
           radius: 52,
-          backgroundColor: _primaryColor.withValues(alpha: 0.1),
+          backgroundColor: _primaryColor.withValues(alpha: 0.25),
           child: Text(
             _selectedAvatar ?? displayInitial,
             style: TextStyle(
@@ -658,13 +651,13 @@ class _SetupScreenState extends State<SetupScreen> {
           style: const TextStyle(
             fontSize: 24,
             fontWeight: FontWeight.w900,
-            color: Color(0xFF1A1A1A),
+            color: Colors.white,
           ),
         ),
         const SizedBox(height: 6),
         Text(
           'Choose your profile picture',
-          style: TextStyle(fontSize: 15, color: Colors.grey[600]),
+          style: TextStyle(fontSize: 15, color: Colors.grey[400]),
         ),
         const SizedBox(height: 32),
         Row(
@@ -686,13 +679,11 @@ class _SetupScreenState extends State<SetupScreen> {
                       height: 80,
                       decoration: BoxDecoration(
                         color: selected
-                            ? _primaryColor.withValues(alpha: 0.12)
-                            : const Color(0xFFF5F5F7),
+                            ? _primaryColor.withValues(alpha: 0.25)
+                            : const Color(0xFF121212),
                         shape: BoxShape.circle,
                         border: Border.all(
-                          color: selected
-                              ? _primaryColor
-                              : Colors.grey.withValues(alpha: 0.25),
+                          color: selected ? _primaryColor : Colors.grey[700]!,
                           width: selected ? 2.5 : 1.5,
                         ),
                         boxShadow: selected
@@ -712,7 +703,7 @@ class _SetupScreenState extends State<SetupScreen> {
                           fontWeight: isCustom
                               ? FontWeight.bold
                               : FontWeight.normal,
-                          color: isCustom ? _primaryColor : null,
+                          color: isCustom ? _primaryColor : Colors.white,
                         ),
                       ),
                     ),
@@ -724,7 +715,7 @@ class _SetupScreenState extends State<SetupScreen> {
                         fontWeight: selected
                             ? FontWeight.w700
                             : FontWeight.w500,
-                        color: selected ? _primaryColor : Colors.grey[600],
+                        color: selected ? _primaryColor : Colors.grey[400],
                       ),
                     ),
                   ],
@@ -803,7 +794,7 @@ class _SetupScreenState extends State<SetupScreen> {
           width: 80,
           height: 80,
           decoration: BoxDecoration(
-            color: Colors.green.withValues(alpha: 0.1),
+            color: Colors.green.withValues(alpha: 0.2),
             borderRadius: BorderRadius.circular(24),
           ),
           child: const Icon(
@@ -818,30 +809,23 @@ class _SetupScreenState extends State<SetupScreen> {
           style: TextStyle(
             fontSize: 28,
             fontWeight: FontWeight.w900,
-            color: Color(0xFF1A1A1A),
+            color: Colors.white,
           ),
         ),
         const SizedBox(height: 8),
         Text(
           "Here's your personal Knock ID.\nShare it with friends to connect!",
           textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 15, color: Colors.grey[600], height: 1.5),
+          style: TextStyle(fontSize: 15, color: Colors.grey[400], height: 1.5),
         ),
         const SizedBox(height: 32),
         Container(
           width: double.infinity,
           padding: const EdgeInsets.symmetric(vertical: 24),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: const Color(0xFF121212),
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: _primaryColor.withValues(alpha: 0.3)),
-            boxShadow: [
-              BoxShadow(
-                color: _primaryColor.withValues(alpha: 0.08),
-                blurRadius: 20,
-                offset: const Offset(0, 8),
-              ),
-            ],
+            border: Border.all(color: Colors.grey[700]!),
           ),
           child: Column(
             children: [
@@ -924,6 +908,7 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Map<String, dynamic>> _friends = [];
   bool _loading = true;
   StreamSubscription? _knockSub;
+  StreamSubscription? _connectionsSub;
   String? _myKnockId;
   String? _myDisplayName;
   String? _myAvatarEmoji;
@@ -934,12 +919,26 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadProfile();
     _loadFriends();
     _listenForKnocks();
+    _listenForConnections();
   }
 
   @override
   void dispose() {
     _knockSub?.cancel();
+    _connectionsSub?.cancel();
     super.dispose();
+  }
+
+  void _listenForConnections() {
+    final uid = _uid;
+    if (uid == null) return;
+    _connectionsSub = _sb
+        .from('connections')
+        .stream(primaryKey: ['id'])
+        .eq('user_id', uid)
+        .listen((_) {
+          if (mounted) _loadFriends();
+        });
   }
 
   Future<void> _loadProfile() async {
@@ -979,28 +978,30 @@ class _HomeScreenState extends State<HomeScreen> {
           .eq('user_id', uid);
 
       final friendList = List<Map<String, dynamic>>.from(rows);
-      final friendIds = friendList.map((f) => f['friend_id'] as String).toList();
+      final friendIds = friendList
+          .map((f) => f['friend_id'] as String)
+          .toList();
 
       Map<String, Map<String, dynamic>> lastKnockByFriend = {};
       if (friendIds.isNotEmpty) {
         try {
+          final friendSet = friendIds.toSet();
           final sent = await _sb
               .from('knocks')
               .select('receiver_id, message, created_at')
               .eq('sender_id', uid)
-              .in_('receiver_id', friendIds)
               .order('created_at', ascending: false)
-              .limit(100);
+              .limit(200);
           final received = await _sb
               .from('knocks')
               .select('sender_id, message, created_at')
               .eq('receiver_id', uid)
-              .in_('sender_id', friendIds)
               .order('created_at', ascending: false)
-              .limit(100);
+              .limit(200);
 
           for (final k in sent) {
-            final fid = k['receiver_id'] as String;
+            final fid = k['receiver_id'] as String?;
+            if (fid == null || !friendSet.contains(fid)) continue;
             if (!lastKnockByFriend.containsKey(fid)) {
               lastKnockByFriend[fid] = {
                 'message': k['message'],
@@ -1010,9 +1011,12 @@ class _HomeScreenState extends State<HomeScreen> {
             }
           }
           for (final k in received) {
-            final fid = k['sender_id'] as String;
+            final fid = k['sender_id'] as String?;
+            if (fid == null || !friendSet.contains(fid)) continue;
             final existing = lastKnockByFriend[fid];
-            final createdAt = DateTime.tryParse(k['created_at'] as String? ?? '');
+            final createdAt = DateTime.tryParse(
+              k['created_at'] as String? ?? '',
+            );
             final existingAt = existing != null
                 ? DateTime.tryParse(existing['created_at'] as String? ?? '')
                 : null;
@@ -1091,19 +1095,20 @@ class _HomeScreenState extends State<HomeScreen> {
       builder: (ctx) {
         final c = TextEditingController();
         return AlertDialog(
+          backgroundColor: const Color(0xFF121212),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
           ),
           title: const Text(
             'Add Friend',
-            style: TextStyle(fontWeight: FontWeight.bold),
+            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
           ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
                 "Enter your friend's Knock ID to connect",
-                style: TextStyle(color: Colors.grey[600], fontSize: 14),
+                style: TextStyle(color: Colors.grey[400], fontSize: 14),
               ),
               const SizedBox(height: 16),
               TextField(
@@ -1114,20 +1119,21 @@ class _HomeScreenState extends State<HomeScreen> {
                   fontSize: 18,
                   fontWeight: FontWeight.w700,
                   letterSpacing: 2,
+                  color: Colors.white,
                 ),
                 decoration: InputDecoration(
                   hintText: 'KNCK-XXXX',
                   hintStyle: TextStyle(
-                    color: Colors.grey[400],
+                    color: Colors.grey[500],
                     fontWeight: FontWeight.normal,
                     letterSpacing: 2,
                   ),
                   filled: true,
-                  fillColor: const Color(0xFFF5F5F7),
+                  fillColor: const Color(0xFF1E1E1E),
                   prefixIcon: const Icon(Icons.tag, color: _primaryColor),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
-                    borderSide: BorderSide.none,
+                    borderSide: BorderSide(color: Colors.grey[700]!),
                   ),
                 ),
               ),
@@ -1136,7 +1142,7 @@ class _HomeScreenState extends State<HomeScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: Text('Cancel', style: TextStyle(color: Colors.grey[600])),
+              child: Text('Cancel', style: TextStyle(color: Colors.grey[400])),
             ),
             ElevatedButton(
               onPressed: () => Navigator.pop(ctx, c.text.trim().toUpperCase()),
@@ -1194,11 +1200,8 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
 
-      await _sb.from('connections').insert({
-        'user_id': _uid,
-        'friend_id': profile['id'],
-        'label': 'Friend',
-      });
+      final friendId = profile['id'] as String;
+      await _sb.rpc('add_mutual_connection', params: {'friend_id': friendId});
 
       _loadFriends();
 
@@ -1239,7 +1242,9 @@ class _HomeScreenState extends State<HomeScreen> {
         ? _myDisplayName![0].toUpperCase()
         : '?';
     return Scaffold(
+      backgroundColor: const Color(0xFF000000),
       appBar: AppBar(
+        backgroundColor: const Color(0xFF000000),
         automaticallyImplyLeading: false,
         titleSpacing: 16,
         title: const Text(
@@ -1277,7 +1282,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w600,
-                            color: Colors.white.withValues(alpha: 0.85),
+                            color: Colors.grey[500],
                             letterSpacing: 1,
                           ),
                         ),
@@ -1286,13 +1291,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   const SizedBox(width: 10),
                   CircleAvatar(
                     radius: 18,
-                    backgroundColor: Colors.white.withValues(alpha: 0.25),
+                    backgroundColor: _primaryColor.withValues(alpha: 0.3),
                     child: Text(
                       _myAvatarEmoji ?? displayInitial,
                       style: TextStyle(
                         fontSize: _myAvatarEmoji != null ? 20 : 16,
                         fontWeight: FontWeight.bold,
-                        color: const Color(0xFF517DA2),
+                        color: _primaryColor,
                       ),
                     ),
                   ),
@@ -1363,13 +1368,14 @@ class _HomeScreenState extends State<HomeScreen> {
             width: 80,
             height: 80,
             decoration: BoxDecoration(
-              color: _primaryColor.withValues(alpha: 0.08),
+              color: const Color(0xFF121212),
               borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: Colors.grey[800]!),
             ),
-            child: const Icon(
+            child: Icon(
               Icons.people_outline_rounded,
               size: 40,
-              color: _primaryColor,
+              color: _primaryColor.withValues(alpha: 0.8),
             ),
           ),
           const SizedBox(height: 20),
@@ -1378,14 +1384,14 @@ class _HomeScreenState extends State<HomeScreen> {
             style: TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.bold,
-              color: Color(0xFF1A1A1A),
+              color: Colors.white,
             ),
           ),
           const SizedBox(height: 8),
           Text(
             'Tap "Add Friend" and enter their\nKnock ID to connect',
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 14, color: Colors.grey[500]),
+            style: TextStyle(fontSize: 14, color: Colors.grey[400]),
           ),
           const SizedBox(height: 28),
           if (_myKnockId != null) ...[
@@ -1415,18 +1421,16 @@ class _HomeScreenState extends State<HomeScreen> {
                   vertical: 12,
                 ),
                 decoration: BoxDecoration(
-                  color: _primaryColor.withValues(alpha: 0.08),
+                  color: const Color(0xFF121212),
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(
-                    color: _primaryColor.withValues(alpha: 0.2),
-                  ),
+                  border: Border.all(color: Colors.grey[700]!),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
                       _myKnockId!,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.w900,
                         letterSpacing: 3,
@@ -1437,7 +1441,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     Icon(
                       Icons.copy_rounded,
                       size: 16,
-                      color: _primaryColor.withValues(alpha: 0.6),
+                      color: _primaryColor.withValues(alpha: 0.8),
                     ),
                   ],
                 ),
@@ -1554,8 +1558,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator(color: _primaryColor)),
+      return Scaffold(
+        backgroundColor: const Color(0xFF000000),
+        body: const Center(
+          child: CircularProgressIndicator(color: _primaryColor),
+        ),
       );
     }
 
@@ -1564,10 +1571,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
         : '?';
 
     return Scaffold(
+      backgroundColor: const Color(0xFF000000),
       appBar: AppBar(
+        backgroundColor: const Color(0xFF000000),
         title: const Text(
           'Profile',
-          style: TextStyle(fontWeight: FontWeight.w700),
+          style: TextStyle(fontWeight: FontWeight.w700, color: Colors.white),
         ),
         centerTitle: true,
         actions: [
@@ -1589,6 +1598,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 15,
+                        color: Colors.white,
                       ),
                     ),
             ),
@@ -1606,7 +1616,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 children: [
                   CircleAvatar(
                     radius: 52,
-                    backgroundColor: _primaryColor.withValues(alpha: 0.1),
+                    backgroundColor: _primaryColor.withValues(alpha: 0.25),
                     child: Text(
                       _avatarEmoji ?? displayInitial,
                       style: TextStyle(
@@ -1625,7 +1635,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       decoration: BoxDecoration(
                         color: _primaryColor,
                         shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 2),
+                        border: Border.all(color: Colors.black, width: 2),
                       ),
                       child: const Icon(
                         Icons.edit_rounded,
@@ -1640,7 +1650,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             const SizedBox(height: 8),
             Text(
               'Tap an avatar below to change',
-              style: TextStyle(fontSize: 13, color: Colors.grey[500]),
+              style: TextStyle(fontSize: 13, color: Colors.grey[400]),
             ),
             const SizedBox(height: 32),
 
@@ -1663,19 +1673,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
               style: const TextStyle(
                 fontSize: 17,
                 fontWeight: FontWeight.w600,
-                color: Color(0xFF1A1A1A),
+                color: Colors.white,
               ),
               decoration: InputDecoration(
                 filled: true,
-                fillColor: Colors.white,
-                prefixIcon: Icon(Icons.person_outline, color: Colors.grey[500]),
+                fillColor: const Color(0xFF121212),
+                prefixIcon: Icon(Icons.person_outline, color: Colors.grey[400]),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide(color: Colors.grey[300]!),
+                  borderSide: BorderSide(color: Colors.grey[700]!),
                 ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide(color: Colors.grey[300]!),
+                  borderSide: BorderSide(color: Colors.grey[700]!),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
@@ -1703,9 +1713,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
               decoration: BoxDecoration(
-                color: _primaryColor.withValues(alpha: 0.06),
+                color: const Color(0xFF121212),
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: _primaryColor.withValues(alpha: 0.2)),
+                border: Border.all(color: Colors.grey[700]!),
               ),
               child: Row(
                 children: [
@@ -1777,13 +1787,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               height: 70,
                               decoration: BoxDecoration(
                                 color: selected
-                                    ? _primaryColor.withValues(alpha: 0.12)
-                                    : Colors.white,
+                                    ? _primaryColor.withValues(alpha: 0.25)
+                                    : const Color(0xFF121212),
                                 shape: BoxShape.circle,
                                 border: Border.all(
                                   color: selected
                                       ? _primaryColor
-                                      : Colors.grey.withValues(alpha: 0.25),
+                                      : Colors.grey[700]!,
                                   width: selected ? 2.5 : 1.5,
                                 ),
                                 boxShadow: selected
@@ -1877,25 +1887,15 @@ class _FriendCard extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: const Color(0xFF121212),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: accentColor.withValues(alpha: 0.15),
-            width: 1,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.04),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
+          border: Border.all(color: Colors.white10, width: 1),
         ),
         child: Row(
           children: [
             CircleAvatar(
               radius: 26,
-              backgroundColor: accentColor.withValues(alpha: 0.12),
+              backgroundColor: accentColor.withValues(alpha: 0.25),
               child: Text(
                 name.isNotEmpty ? name[0].toUpperCase() : '?',
                 style: TextStyle(
@@ -1915,13 +1915,13 @@ class _FriendCard extends StatelessWidget {
                     style: const TextStyle(
                       fontSize: 17,
                       fontWeight: FontWeight.bold,
-                      color: Color(0xFF1A1A1A),
+                      color: Colors.white,
                     ),
                   ),
                   const SizedBox(height: 2),
                   Text(
                     subtitle,
-                    style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                    style: TextStyle(fontSize: 13, color: Colors.grey[400]),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -1933,13 +1933,10 @@ class _FriendCard extends StatelessWidget {
                 padding: const EdgeInsets.only(right: 8),
                 child: Text(
                   _formatTimestamp(lastMessageAt),
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey[500],
-                  ),
+                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
                 ),
               ),
-            Icon(Icons.chevron_right_rounded, color: Colors.grey[400]),
+            Icon(Icons.chevron_right_rounded, color: Colors.grey[500]),
           ],
         ),
       ),
@@ -1970,49 +1967,53 @@ class UserDetailScreen extends StatefulWidget {
 }
 
 class _UserDetailScreenState extends State<UserDetailScreen> {
-  String? _sentMessage;
   List<Map<String, dynamic>> _knockHistory = [];
-  String? _customText;
-  bool _loadingConnection = true;
-  bool _savingCustom = false;
-  bool _showCustomField = false;
-  final _customTextC = TextEditingController();
+  final _messageC = TextEditingController();
+  StreamSubscription? _knockStreamSub;
+  bool _loading = true;
 
-  static const _chatBg = Color(0xFFE3EFF3);
-  static const _senderBubble = Color(0xFFEFFDDE);
-  static const _receiverBubble = Colors.white;
+  static const _chatBg = Color(0xFF000000);
+  static const _senderBubble = Color(0xFF1A1A1A);
+  static const _receiverBubble = Color(0xFF121212);
 
   @override
   void initState() {
     super.initState();
-    _loadConnectionAndHistory();
+    _loadHistory();
+    _listenForKnocks();
   }
 
   @override
   void dispose() {
-    _customTextC.dispose();
+    _messageC.dispose();
+    _knockStreamSub?.cancel();
     super.dispose();
   }
 
-  Future<void> _loadConnectionAndHistory() async {
+  void _listenForKnocks() {
+    final uid = _uid;
+    if (uid == null) return;
+    _knockStreamSub = _sb
+        .from('knocks')
+        .stream(primaryKey: ['id'])
+        .eq('receiver_id', uid)
+        .listen((rows) {
+          for (final r in rows) {
+            if (r['sender_id'] == widget.friendId && mounted) {
+              _loadHistory();
+              break;
+            }
+          }
+        });
+  }
+
+  Future<void> _loadHistory() async {
     final uid = _uid;
     if (uid == null) {
-      setState(() => _loadingConnection = false);
+      setState(() => _loading = false);
       return;
     }
     try {
-      Map<String, dynamic>? conn;
-      try {
-        conn = await _sb
-            .from('connections')
-            .select('custom_text')
-            .eq('user_id', uid)
-            .eq('friend_id', widget.friendId)
-            .maybeSingle();
-      } catch (_) {
-        conn = null;
-      }
-
       final sent = await _sb
           .from('knocks')
           .select('message, created_at')
@@ -2046,61 +2047,28 @@ class _UserDetailScreenState extends State<UserDetailScreen> {
 
       if (mounted) {
         setState(() {
-          _customText = conn != null ? conn['custom_text'] as String? : null;
-          if (_customText != null && _customText!.isNotEmpty) {
-            _customTextC.text = _customText!;
-          }
           _knockHistory = combined;
-          _loadingConnection = false;
+          _loading = false;
         });
       }
     } catch (e) {
-      debugPrint('Load connection error: $e');
-      if (mounted) {
-        setState(() => _loadingConnection = false);
-      }
+      debugPrint('Load history error: $e');
+      if (mounted) setState(() => _loading = false);
     }
   }
 
-  Future<void> _saveCustomText() async {
-    final text = _customTextC.text.trim();
-    if (text.isEmpty) return;
+  Future<void> _sendKnock() async {
+    final message = _messageC.text.trim();
+    if (message.isEmpty) return;
     final uid = _uid;
     if (uid == null) return;
 
-    setState(() => _savingCustom = true);
-    try {
-      await _sb
-          .from('connections')
-          .update({'custom_text': text})
-          .eq('user_id', uid)
-          .eq('friend_id', widget.friendId);
-
-      if (mounted) {
-        setState(() {
-          _customText = text;
-          _showCustomField = false;
-          _savingCustom = false;
-        });
-      }
-    } catch (e) {
-      debugPrint('Save custom text error: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to save: $e')),
-        );
-        setState(() => _savingCustom = false);
-      }
-    }
-  }
-
-  Future<void> _sendMessage(String message) async {
     HapticFeedback.heavyImpact();
-    setState(() => _sentMessage = message);
+    _messageC.clear();
 
     try {
       await _sb.from('knocks').insert({
-        'sender_id': _uid,
+        'sender_id': uid,
         'receiver_id': widget.friendId,
         'message': message,
       });
@@ -2122,14 +2090,7 @@ class _UserDetailScreenState extends State<UserDetailScreen> {
         ).showSnackBar(SnackBar(content: Text('Failed to send: $e')));
       }
     }
-
-    Future.delayed(const Duration(milliseconds: 1200), () {
-      if (mounted) setState(() => _sentMessage = null);
-    });
   }
-
-  bool get _hasCustomText =>
-      _customText != null && _customText!.trim().isNotEmpty;
 
   @override
   Widget build(BuildContext context) {
@@ -2145,296 +2106,109 @@ class _UserDetailScreenState extends State<UserDetailScreen> {
         ),
         centerTitle: true,
       ),
-      body: _loadingConnection
-          ? const Center(child: CircularProgressIndicator(color: Color(0xFF517DA2)))
+      body: _loading
+          ? const Center(child: CircularProgressIndicator(color: _primaryColor))
           : Column(
               children: [
                 Expanded(
-                  child: ListView.builder(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                    itemCount: _knockHistory.length,
-                    itemBuilder: (context, i) {
-                      final k = _knockHistory[i];
-                      final isMe = k['is_from_me'] as bool? ?? false;
-                      return Align(
-                        alignment:
-                            isMe ? Alignment.centerRight : Alignment.centerLeft,
-                        child: Container(
-                          margin: EdgeInsets.only(
-                            bottom: 8,
-                            left: isMe ? 64 : 0,
-                            right: isMe ? 0 : 64,
-                          ),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 10,
-                          ),
-                          decoration: BoxDecoration(
-                            color: isMe ? _senderBubble : _receiverBubble,
-                            borderRadius: BorderRadius.only(
-                              topLeft: const Radius.circular(18),
-                              topRight: const Radius.circular(18),
-                              bottomLeft: Radius.circular(isMe ? 18 : 4),
-                              bottomRight: Radius.circular(isMe ? 4 : 18),
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.06),
-                                blurRadius: 6,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
+                  child: _knockHistory.isEmpty
+                      ? Center(
                           child: Text(
-                            k['message'] as String? ?? '',
+                            'Send your first knock',
                             style: TextStyle(
-                              fontSize: 15,
-                              color: Colors.grey[800],
+                              fontSize: 16,
+                              color: Colors.grey[500],
                             ),
                           ),
+                        )
+                      : ListView.builder(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                          itemCount: _knockHistory.length,
+                          itemBuilder: (context, i) {
+                            final k = _knockHistory[i];
+                            final isMe = k['is_from_me'] as bool? ?? false;
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: Row(
+                                mainAxisAlignment: isMe
+                                    ? MainAxisAlignment.end
+                                    : MainAxisAlignment.start,
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 14,
+                                      vertical: 10,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: isMe
+                                          ? _senderBubble
+                                          : _receiverBubble,
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: Colors.white10,
+                                        width: 1,
+                                      ),
+                                    ),
+                                    child: Text(
+                                      k['message'] as String? ?? '',
+                                      style: const TextStyle(
+                                        fontSize: 15,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
                         ),
-                      );
-                    },
-                  ),
                 ),
                 Container(
                   padding: const EdgeInsets.all(16),
-                  color: _chatBg,
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 300),
-                    child: _hasCustomText
-                        ? _buildQuickMessageGrid()
-                        : _buildSetCustomKnockSection(),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF1A1A1A),
+                    border: Border(top: BorderSide(color: Colors.white10)),
                   ),
-                ),
-                AnimatedOpacity(
-                  opacity: _sentMessage != null ? 1.0 : 0.0,
-                  duration: const Duration(milliseconds: 300),
-                  child: Padding(
-                    padding: const EdgeInsets.only(bottom: 16),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.check_circle_rounded,
-                          color: widget.accentColor,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Knock sent!',
-                          style: TextStyle(
-                            color: widget.accentColor,
-                            fontWeight: FontWeight.bold,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _messageC,
+                          style: const TextStyle(color: Colors.white),
+                          decoration: InputDecoration(
+                            hintText: 'Set Custom Knock...',
+                            hintStyle: TextStyle(color: Colors.grey[500]),
+                            filled: true,
+                            fillColor: const Color(0xFF121212),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(24),
+                              borderSide: BorderSide.none,
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 20,
+                              vertical: 12,
+                            ),
                           ),
+                          onSubmitted: (_) => _sendKnock(),
                         ),
-                      ],
-                    ),
+                      ),
+                      const SizedBox(width: 12),
+                      IconButton.filled(
+                        onPressed: _sendKnock,
+                        icon: const Icon(Icons.send_rounded),
+                        style: IconButton.styleFrom(
+                          backgroundColor: _primaryColor,
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
-    );
-  }
-
-  Widget _buildSetCustomKnockSection() {
-    if (_showCustomField) {
-      return Container(
-        key: const ValueKey('custom_field'),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.06),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: _customTextC,
-              autofocus: true,
-              decoration: InputDecoration(
-                hintText: "e.g. Yo, it's Melvin!",
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
-                ),
-                filled: true,
-                fillColor: const Color(0xFFF5F5F7),
-              ),
-              maxLength: 100,
-              onSubmitted: (_) => _saveCustomText(),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                TextButton(
-                  onPressed: _savingCustom
-                      ? null
-                      : () => setState(() => _showCustomField = false),
-                  child: const Text('Cancel'),
-                ),
-                const SizedBox(width: 8),
-                ElevatedButton(
-                  onPressed: _savingCustom ? null : _saveCustomText,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF517DA2),
-                    foregroundColor: Colors.white,
-                  ),
-                  child: _savingCustom
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : const Text('Save'),
-                ),
-              ],
-            ),
-          ],
-        ),
-      );
-    }
-    return Center(
-      key: const ValueKey('set_button'),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Material(
-          color: const Color(0xFF517DA2),
-          borderRadius: BorderRadius.circular(16),
-          child: InkWell(
-            onTap: () => setState(() => _showCustomField = true),
-            borderRadius: BorderRadius.circular(16),
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 32,
-                vertical: 16,
-              ),
-              child: const Text(
-                'Set Your Custom Knock',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildQuickMessageGrid() {
-    return Container(
-      key: const ValueKey('grid'),
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'SEND A KNOCK',
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 2,
-              color: Colors.grey[600],
-            ),
-          ),
-          const SizedBox(height: 12),
-          GridView.count(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            crossAxisCount: 2,
-            mainAxisSpacing: 12,
-            crossAxisSpacing: 12,
-            childAspectRatio: 2.6,
-            children: _defaultQuickMessages.map((msg) {
-              final isSent = _sentMessage == msg;
-              return _QuickMessageButton(
-                message: msg,
-                accentColor: widget.accentColor,
-                isSent: isSent,
-                onTap: () => _sendMessage(msg),
-              );
-            }).toList(),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Quick-message button widget
-// ---------------------------------------------------------------------------
-
-class _QuickMessageButton extends StatelessWidget {
-  const _QuickMessageButton({
-    required this.message,
-    required this.accentColor,
-    required this.isSent,
-    required this.onTap,
-  });
-
-  final String message;
-  final Color accentColor;
-  final bool isSent;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        decoration: BoxDecoration(
-          color: isSent ? accentColor.withValues(alpha: 0.12) : Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: isSent ? accentColor : Colors.grey.withValues(alpha: 0.2),
-            width: isSent ? 1.5 : 1,
-          ),
-          boxShadow: isSent
-              ? [
-                  BoxShadow(
-                    color: accentColor.withValues(alpha: 0.2),
-                    blurRadius: 12,
-                  ),
-                ]
-              : [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.03),
-                    blurRadius: 6,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-        ),
-        alignment: Alignment.center,
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        child: Text(
-          message,
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w600,
-            color: isSent ? accentColor : const Color(0xFF333333),
-          ),
-        ),
-      ),
     );
   }
 }
