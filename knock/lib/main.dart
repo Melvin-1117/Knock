@@ -3,7 +3,10 @@ import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -83,8 +86,21 @@ class KnockRelationship {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
   await Supabase.initialize(url: _supabaseUrl, anonKey: _supabaseAnonKey);
+
+  // FCM setup
+  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
   runApp(const KnockApp());
+
+}
+
+// FCM background handler
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp();
+  // You can handle background messages here
+  print('Handling a background message: ${message.messageId}');
+}
 }
 
 // ---------------------------------------------------------------------------
@@ -92,11 +108,54 @@ Future<void> main() async {
 // ---------------------------------------------------------------------------
 
 class KnockApp extends StatelessWidget {
+  // FCM foreground handler widget
+  class FcmHandler extends StatefulWidget {
+    final Widget child;
+    const FcmHandler({required this.child, super.key});
+
+    @override
+    State<FcmHandler> createState() => _FcmHandlerState();
+  }
+
+  class _FcmHandlerState extends State<FcmHandler> {
+    @override
+    void initState() {
+      super.initState();
+      _initFcm();
+    }
+
+    Future<void> _initFcm() async {
+      FirebaseMessaging messaging = FirebaseMessaging.instance;
+      NotificationSettings settings = await messaging.requestPermission();
+      print('FCM permission: ${settings.authorizationStatus}');
+
+      // Get FCM token
+      String? token = await messaging.getToken();
+      print('FCM Token: $token');
+
+      // Listen for foreground messages
+      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+        print('Received a foreground message: ${message.messageId}');
+        // TODO: Show notification or handle message
+      });
+      // Listen for messages when app is opened from notification
+      FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+        print('App opened from notification: ${message.messageId}');
+        // TODO: Handle navigation or logic
+      });
+    }
+
+    @override
+    Widget build(BuildContext context) {
+      return widget.child;
+    }
+  }
   const KnockApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
+    return FcmHandler(
+      child: MaterialApp(
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
@@ -369,7 +428,7 @@ class _SetupScreenState extends State<SetupScreen> {
   String? _error;
   String? _generatedId;
   String? _selectedAvatar;
-  int _step = 0; // 0 = username, 1 = avatar pick, 2 = knock ID card
+  int _step = 0; // 0 = username, 1 = knock ID card
 
   Future<void> _submitUsername() async {
     final name = _usernameC.text.trim();
@@ -377,10 +436,8 @@ class _SetupScreenState extends State<SetupScreen> {
       setState(() => _error = 'Please enter a username');
       return;
     }
-    setState(() {
-      _error = null;
-      _step = 1; // move to avatar step
-    });
+    setState(() => _error = null);
+    await _createAccount();
   }
 
   Future<void> _createAccount() async {
@@ -450,7 +507,7 @@ class _SetupScreenState extends State<SetupScreen> {
       } else {
         setState(() {
           _generatedId = existing['knock_code'] as String? ?? userId;
-          _step = 2;
+          _step = 1;
           _loading = false;
         });
         return;
@@ -458,7 +515,7 @@ class _SetupScreenState extends State<SetupScreen> {
 
       setState(() {
         _generatedId = userId;
-        _step = 2;
+        _step = 1;
         _loading = false;
       });
     } catch (e) {
@@ -488,8 +545,6 @@ class _SetupScreenState extends State<SetupScreen> {
               duration: const Duration(milliseconds: 400),
               child: _step == 0
                   ? _buildUsernameStep()
-                  : _step == 1
-                  ? _buildAvatarStep()
                   : _buildIdCard(),
             ),
           ),
@@ -563,151 +618,7 @@ class _SetupScreenState extends State<SetupScreen> {
           width: double.infinity,
           height: 54,
           child: ElevatedButton(
-            onPressed: _submitUsername,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: _cardColorElevated,
-              foregroundColor: Colors.white,
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-                side: const BorderSide(color: _borderColor),
-              ),
-            ),
-            child: const Text(
-              'NEXT',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
-                letterSpacing: 1,
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildAvatarStep() {
-    final displayInitial = _usernameC.text.trim().isNotEmpty
-        ? _usernameC.text.trim()[0].toUpperCase()
-        : '?';
-
-    // Avatar options: Male, Female, Custom (initial letter)
-    final avatarOptions = [
-      {'emoji': '\u{1F468}', 'label': 'Male'},
-      {'emoji': '\u{1F469}', 'label': 'Female'},
-      {'emoji': displayInitial, 'label': 'Custom'},
-    ];
-
-    return Column(
-      key: const ValueKey('step1'),
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // Preview avatar
-        CircleAvatar(
-          radius: 52,
-          backgroundColor: _cardColorAlt,
-          child: Text(
-            _selectedAvatar ?? displayInitial,
-            style: TextStyle(
-              fontSize: _selectedAvatar != null ? 44 : 38,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
-          ),
-        ),
-        const SizedBox(height: 20),
-        Text(
-          'Hi, ${_usernameC.text.trim()}!',
-          style: const TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.w900,
-            color: Colors.white,
-          ),
-        ),
-        const SizedBox(height: 6),
-        const Text(
-          'Choose your profile picture',
-          style: TextStyle(fontSize: 15, color: _mutedTextColor),
-        ),
-        const SizedBox(height: 32),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: avatarOptions.map((opt) {
-            final emoji = opt['emoji']!;
-            final label = opt['label']!;
-            final isCustom = label == 'Custom';
-            final selected = _selectedAvatar == emoji;
-            return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: GestureDetector(
-                onTap: () => setState(() => _selectedAvatar = emoji),
-                child: Column(
-                  children: [
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      width: 80,
-                      height: 80,
-                      decoration: BoxDecoration(
-                        color: selected
-                            ? _cardColorElevated
-                            : _cardColor,
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: selected ? Colors.white : _borderColor,
-                          width: selected ? 2.5 : 1.5,
-                        ),
-                        boxShadow: selected
-                            ? [
-                                BoxShadow(
-                                  color: Colors.white.withValues(alpha: 0.08),
-                                  blurRadius: 12,
-                                ),
-                              ]
-                            : null,
-                      ),
-                      alignment: Alignment.center,
-                      child: Text(
-                        emoji,
-                        style: TextStyle(
-                          fontSize: isCustom ? 30 : 36,
-                          fontWeight: isCustom
-                              ? FontWeight.bold
-                              : FontWeight.normal,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      label,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: selected
-                            ? FontWeight.w700
-                            : FontWeight.w500,
-                        color: selected ? Colors.white : _mutedTextColor,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }).toList(),
-        ),
-        if (_error != null) ...[
-          const SizedBox(height: 12),
-          Text(
-            _error!,
-            style: const TextStyle(color: Colors.redAccent, fontSize: 14),
-          ),
-        ],
-        const SizedBox(height: 28),
-        SizedBox(
-          width: double.infinity,
-          height: 54,
-          child: ElevatedButton(
-            onPressed: _loading ? null : _createAccount,
+            onPressed: _loading ? null : _submitUsername,
             style: ElevatedButton.styleFrom(
               backgroundColor: _cardColorElevated,
               foregroundColor: Colors.white,
@@ -736,26 +647,10 @@ class _SetupScreenState extends State<SetupScreen> {
                   ),
           ),
         ),
-        const SizedBox(height: 12),
-        TextButton(
-          onPressed: _loading
-              ? null
-              : () {
-                  setState(() => _selectedAvatar = null);
-                  _createAccount();
-                },
-          child: const Text(
-            'Skip for now',
-            style: TextStyle(
-              color: _subtleTextColor,
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ),
       ],
     );
   }
+
 
   Widget _buildIdCard() {
     return Column(
@@ -911,7 +806,10 @@ class _HomeScreenState extends State<HomeScreen> {
         .stream(primaryKey: ['id'])
         .eq('user_id', uid)
         .listen((_) {
-          if (mounted) _loadFriends();
+          // Small delay so the profile join data is available
+          Future.delayed(const Duration(milliseconds: 500), () {
+            if (mounted) _loadFriends();
+          });
         });
   }
 
@@ -1040,6 +938,19 @@ class _HomeScreenState extends State<HomeScreen> {
                 DateTime.now().toUtc().difference(createdAt).inSeconds < 5) {
               HapticFeedback.heavyImpact();
               if (mounted) {
+                // Look up sender name from friends list
+                final senderId = latest['sender_id'] as String?;
+                String senderName = 'Someone';
+                for (final f in _friends) {
+                  if (f['friend_id'] == senderId) {
+                    final profile =
+                        f['profiles'] as Map<String, dynamic>? ?? {};
+                    senderName = profile['display_name'] ??
+                        profile['username'] ??
+                        'Someone';
+                    break;
+                  }
+                }
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     backgroundColor: _cardColorElevated,
@@ -1048,7 +959,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                     content: Text(
-                      '\u{1F514} ${latest['message']}',
+                      '$senderName: ${latest['message']}',
                       style: const TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.bold,
@@ -1947,33 +1858,42 @@ class UserDetailScreen extends StatefulWidget {
 }
 
 class _UserDetailScreenState extends State<UserDetailScreen> {
-  List<Map<String, dynamic>> _knockHistory = [];
   List<String> _customKnocks = [];
   final _newKnockC = TextEditingController();
-  StreamSubscription? _knockStreamSub;
-  int _sendingIndex = -1; // which custom knock tile is animating
-
-  static const _chatBg = Color(0xFF000000);
-  static const _senderBubble = Color(0xFF1A1A1A);
-  static const _receiverBubble = Color(0xFF121212);
+  int _sendingIndex = -1;
 
   @override
   void initState() {
     super.initState();
     _fetchCustomKnocks();
-    _listenForKnocks();
   }
 
   @override
   void dispose() {
     _newKnockC.dispose();
-    _knockStreamSub?.cancel();
     super.dispose();
   }
 
-  // ---- Persistence (JSON array in custom_text column) ----
+  // ---- Persistence (local SharedPreferences + Supabase sync) ----
+
+  String get _localKey => 'knocks_${widget.friendId}';
 
   Future<void> _fetchCustomKnocks() async {
+    // 1. Load from local storage first (instant)
+    final prefs = await SharedPreferences.getInstance();
+    final local = prefs.getString(_localKey);
+    if (local != null && local.isNotEmpty && mounted) {
+      setState(() {
+        try {
+          final decoded = jsonDecode(local);
+          if (decoded is List) {
+            _customKnocks = decoded.cast<String>();
+          }
+        } catch (_) {}
+      });
+    }
+
+    // 2. Also try fetching from Supabase (merge/sync)
     final uid = _uid;
     if (uid == null) return;
     try {
@@ -1986,34 +1906,46 @@ class _UserDetailScreenState extends State<UserDetailScreen> {
       if (conn == null || !mounted) return;
       final raw = conn['custom_text'] as String?;
       if (raw == null || raw.isEmpty) return;
-      setState(() {
-        try {
-          final decoded = jsonDecode(raw);
-          if (decoded is List) {
-            _customKnocks = decoded.cast<String>();
-          } else {
-            // backward compat: plain string → wrap in list
-            _customKnocks = [raw];
-          }
-        } catch (_) {
-          // Not valid JSON – treat as single legacy string
-          _customKnocks = [raw];
+      List<String> remote = [];
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is List) {
+          remote = decoded.cast<String>();
+        } else {
+          remote = [raw];
         }
-      });
+      } catch (_) {
+        remote = [raw];
+      }
+      // If remote has data and local is empty, use remote
+      if (remote.isNotEmpty && _customKnocks.isEmpty) {
+        setState(() => _customKnocks = remote);
+        await prefs.setString(_localKey, jsonEncode(remote));
+      }
     } catch (e) {
-      debugPrint('Fetch custom knocks error: $e');
+      debugPrint('Fetch custom knocks from Supabase: $e');
     }
   }
 
   Future<void> _saveKnocksList() async {
+    final encoded = jsonEncode(_customKnocks);
+
+    // 1. Save locally (always works)
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_localKey, encoded);
+
+    // 2. Sync to Supabase (best effort)
     final uid = _uid;
     if (uid == null) return;
-    final encoded = jsonEncode(_customKnocks);
-    await _sb
-        .from('connections')
-        .update({'custom_text': encoded})
-        .eq('user_id', uid)
-        .eq('friend_id', widget.friendId);
+    try {
+      await _sb
+          .from('connections')
+          .update({'custom_text': encoded})
+          .eq('user_id', uid)
+          .eq('friend_id', widget.friendId);
+    } catch (e) {
+      debugPrint('Sync custom knocks to Supabase: $e');
+    }
   }
 
   void _addKnock() {
@@ -2027,30 +1959,18 @@ class _UserDetailScreenState extends State<UserDetailScreen> {
   }
 
   void _removeKnock(int index) {
+    final removed = _customKnocks[index];
     setState(() => _customKnocks.removeAt(index));
     _saveKnocksList();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Custom knock removed'),
+        SnackBar(
+          content: Text('"$removed" removed'),
           behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
         ),
       );
     }
-  }
-
-  // ---- Listen to incoming knocks ----
-
-  void _listenForKnocks() {
-    final uid = _uid;
-    if (uid == null) return;
-    _knockStreamSub = _sb
-        .from('knocks')
-        .stream(primaryKey: ['id'])
-        .eq('receiver_id', uid)
-        .listen((rows) {
-          if (mounted) setState(() => _knockHistory = rows);
-        });
   }
 
   // ---- Send a knock (one-tap) ----
@@ -2066,6 +1986,32 @@ class _UserDetailScreenState extends State<UserDetailScreen> {
         'receiver_id': widget.friendId,
         'message': message,
       });
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Row(
+              children: [
+                Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
+                SizedBox(width: 10),
+                Text(
+                  'Knock sent!',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: _cardColorElevated,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
     } catch (e) {
       debugPrint('Send error: $e');
       if (mounted) {
@@ -2083,7 +2029,7 @@ class _UserDetailScreenState extends State<UserDetailScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _chatBg,
+      backgroundColor: Colors.black,
       appBar: AppBar(
         title: Text(
           widget.name,
@@ -2095,243 +2041,182 @@ class _UserDetailScreenState extends State<UserDetailScreen> {
         centerTitle: true,
       ),
       body: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ---- Knock history (chat bubbles) ----
+          // ---- Header ----
+          const Padding(
+            padding: EdgeInsets.fromLTRB(20, 20, 20, 12),
+            child: Text(
+              'SEND A KNOCK',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 3,
+                color: _subtleTextColor,
+              ),
+            ),
+          ),
+
+          // ---- Scrollable knock list ----
           Expanded(
-            child: _knockHistory.isEmpty
+            child: _customKnocks.isEmpty
                 ? const Center(
-                    child: Text(
-                      'Send your first knock',
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: _mutedTextColor,
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 40),
+                      child: Text(
+                        'No custom knocks yet.\nAdd one below!',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 15,
+                          color: _mutedTextColor,
+                          height: 1.6,
+                        ),
                       ),
                     ),
                   )
-                : ListView.builder(
+                : ListView.separated(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 16,
-                      vertical: 12,
+                      vertical: 4,
                     ),
-                    itemCount: _knockHistory.length,
+                    itemCount: _customKnocks.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
                     itemBuilder: (context, i) {
-                      final k = _knockHistory[i];
-                      final isMe = k['sender_id'] == _uid;
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Row(
-                          mainAxisAlignment: isMe
-                              ? MainAxisAlignment.end
-                              : MainAxisAlignment.start,
-                          children: [
-                            Container(
-                              constraints: BoxConstraints(
-                                maxWidth:
-                                    MediaQuery.of(context).size.width * 0.72,
-                              ),
+                      final msg = _customKnocks[i];
+                      final isSending = _sendingIndex == i;
+                      return AnimatedScale(
+                        scale: isSending ? 1.04 : 1.0,
+                        duration: const Duration(milliseconds: 180),
+                        curve: Curves.easeOut,
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: isSending
+                                ? null
+                                : () => _sendKnock(msg, i),
+                            onLongPress: () => _removeKnock(i),
+                            borderRadius: BorderRadius.circular(14),
+                            child: Container(
+                              width: double.infinity,
                               padding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                                vertical: 10,
+                                horizontal: 20,
+                                vertical: 16,
                               ),
                               decoration: BoxDecoration(
-                                color: isMe
-                                    ? _senderBubble
-                                    : _receiverBubble,
-                                borderRadius: BorderRadius.circular(12),
+                                color: _cardColor,
+                                borderRadius: BorderRadius.circular(14),
                                 border: Border.all(
-                                  color: _borderColor,
+                                  color: isSending
+                                      ? Colors.white
+                                      : _borderColor,
                                   width: 1,
                                 ),
                               ),
-                              child: Text(
-                                k['message'] as String? ?? '',
-                                style: const TextStyle(
-                                  fontSize: 15,
-                                  color: Colors.white,
-                                ),
+                              child: Row(
+                                children: [
+                                  const Icon(
+                                    Icons.touch_app_rounded,
+                                    size: 18,
+                                    color: _mutedTextColor,
+                                  ),
+                                  const SizedBox(width: 14),
+                                  Expanded(
+                                    child: Text(
+                                      msg,
+                                      style: const TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                  const Icon(
+                                    Icons.chevron_right_rounded,
+                                    size: 20,
+                                    color: _subtleTextColor,
+                                  ),
+                                ],
                               ),
                             ),
-                          ],
+                          ),
                         ),
                       );
                     },
                   ),
           ),
 
-          // ---- Custom knocks panel ----
+          // ---- Add knock input ----
           Container(
-            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
             decoration: const BoxDecoration(
               color: _cardColor,
               border: Border(
                 top: BorderSide(color: _borderColor, width: 1),
               ),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Header
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(20, 16, 20, 8),
-                  child: Text(
-                    'CUSTOM KNOCKS',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 3,
-                      color: _subtleTextColor,
-                    ),
-                  ),
-                ),
-
-                // Tiles
-                if (_customKnocks.isNotEmpty)
-                  Padding(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                    child: Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: List.generate(_customKnocks.length, (i) {
-                        final msg = _customKnocks[i];
-                        final isSending = _sendingIndex == i;
-                        return AnimatedScale(
-                          scale: isSending ? 1.08 : 1.0,
-                          duration: const Duration(milliseconds: 180),
-                          curve: Curves.easeOut,
-                          child: Material(
-                            color: Colors.transparent,
-                            child: InkWell(
-                              onTap: isSending
-                                  ? null
-                                  : () => _sendKnock(msg, i),
-                              onLongPress: () => _removeKnock(i),
-                              borderRadius: BorderRadius.circular(14),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 12,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: _cardColorElevated,
-                                  borderRadius: BorderRadius.circular(14),
-                                  border: Border.all(
-                                    color: isSending
-                                        ? Colors.white
-                                        : _borderColor,
-                                    width: 1,
-                                  ),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(
-                                      Icons.touch_app_rounded,
-                                      size: 16,
-                                      color: _mutedTextColor,
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      msg,
-                                      style: const TextStyle(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w600,
-                                        color: Colors.white,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                        );
-                      }),
-                    ),
-                  ),
-
-                if (_customKnocks.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                    child: Text(
-                      'Add a custom knock to send with one tap',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: _subtleTextColor,
+            child: SafeArea(
+              top: false,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _newKnockC,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
                       ),
-                    ),
-                  ),
-
-                // Add-knock input row
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _newKnockC,
-                          style: const TextStyle(
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) => _addKnock(),
+                      decoration: InputDecoration(
+                        hintText: 'e.g. Drink Water, Take Medicine...',
+                        hintStyle: const TextStyle(
+                          color: _subtleTextColor,
+                          fontSize: 14,
+                        ),
+                        filled: true,
+                        fillColor: _cardColorAlt,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: const BorderSide(color: _borderColor),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: const BorderSide(color: _borderColor),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: const BorderSide(
                             color: Colors.white,
-                            fontSize: 15,
-                          ),
-                          textInputAction: TextInputAction.done,
-                          onSubmitted: (_) => _addKnock(),
-                          decoration: InputDecoration(
-                            hintText: 'e.g. Drink Water, Take Medicine...',
-                            hintStyle: const TextStyle(
-                              color: _subtleTextColor,
-                              fontSize: 14,
-                            ),
-                            filled: true,
-                            fillColor: _cardColorAlt,
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 12,
-                            ),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(14),
-                              borderSide:
-                                  const BorderSide(color: _borderColor),
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(14),
-                              borderSide:
-                                  const BorderSide(color: _borderColor),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(14),
-                              borderSide: const BorderSide(
-                                color: Colors.white,
-                                width: 2,
-                              ),
-                            ),
+                            width: 2,
                           ),
                         ),
                       ),
-                      const SizedBox(width: 10),
-                      SizedBox(
-                        height: 48,
-                        child: ElevatedButton(
-                          onPressed: _addKnock,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: _cardColorElevated,
-                            foregroundColor: Colors.white,
-                            elevation: 0,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 18,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                              side: const BorderSide(color: _borderColor),
-                            ),
-                          ),
-                          child: const Icon(Icons.add_rounded, size: 22),
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
-                ),
-              ],
+                  const SizedBox(width: 10),
+                  SizedBox(
+                    height: 48,
+                    child: ElevatedButton(
+                      onPressed: _addKnock,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _cardColorElevated,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(horizontal: 18),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          side: const BorderSide(color: _borderColor),
+                        ),
+                      ),
+                      child: const Icon(Icons.add_rounded, size: 22),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ],
