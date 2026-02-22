@@ -1,4 +1,5 @@
 ﻿import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -13,42 +14,23 @@ const _supabaseAnonKey =
     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92cHhldW93endqcnZoa3VsbGRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEzNDI0ODEsImV4cCI6MjA4NjkxODQ4MX0.obWpaemtnKatOmDVveR5xczThnjMi3l9QECE_Qu7H_k';
 
 const _accentColors = [
-  Color(0xFF1E88E5),
-  Color(0xFF00BFA6),
-  Color(0xFFFF6D00),
-  Color(0xFFE040FB),
-  Color(0xFF00ACC1),
-  Color(0xFFFF4081),
+  Color(0xFFE0E0E0),
+  Color(0xFFBDBDBD),
+  Color(0xFF9E9E9E),
+  Color(0xFF757575),
+  Color(0xFFCCCCCC),
+  Color(0xFFB0B0B0),
 ];
 
-const _primaryColor = Color(0xFF1E88E5);
+// -- Design tokens --
+const _primaryColor = Color(0xFFE0E0E0); // silver
+const _cardColor = Color(0xFF121212);
+const _cardColorAlt = Color(0xFF1E1E1E);
+const _cardColorElevated = Color(0xFF2C2C2C);
+const _borderColor = Color(0xFF2C2C2C);
+const _subtleTextColor = Color(0xFF757575);
+const _mutedTextColor = Color(0xFF9E9E9E);
 
-const _avatarEmojis = [
-  '\u{1F600}',
-  '\u{1F60E}',
-  '\u{1F917}',
-  '\u{1F973}',
-  '\u{1F60A}',
-  '\u{1F920}',
-  '\u{1F98A}',
-  '\u{1F431}',
-  '\u{1F436}',
-  '\u{1F981}',
-  '\u{1F43B}',
-  '\u{1F43C}',
-  '\u{1F31F}',
-  '\u{26A1}',
-  '\u{1F525}',
-  '\u{1F308}',
-  '\u{1F3AF}',
-  '\u{1F48E}',
-  '\u{1F3AE}',
-  '\u{1F3B5}',
-  '\u{1F4DA}',
-  '\u{26BD}',
-  '\u{1F3C0}',
-  '\u{1F3A8}',
-];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -119,24 +101,32 @@ class KnockApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         brightness: Brightness.dark,
-        // Only set colorScheme, not colorSchemeSeed, to avoid assertion error
-        scaffoldBackgroundColor: const Color(0xFF000000),
+        scaffoldBackgroundColor: Colors.black,
         colorScheme: ColorScheme.dark(
-          primary: _primaryColor,
-          surface: const Color(0xFF1A1A1A),
+          primary: Colors.white,
+          surface: _cardColor,
           onSurface: Colors.white,
         ),
         appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFF000000),
+          backgroundColor: Colors.black,
           elevation: 0,
-          scrolledUnderElevation: 1,
+          scrolledUnderElevation: 0,
+          surfaceTintColor: Colors.transparent,
           iconTheme: IconThemeData(color: Colors.white),
           titleTextStyle: TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.w900,
-            letterSpacing: 4,
+            letterSpacing: 8,
             fontSize: 22,
           ),
+        ),
+        snackBarTheme: SnackBarThemeData(
+          backgroundColor: _cardColorElevated,
+          contentTextStyle: const TextStyle(color: Colors.white),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          behavior: SnackBarBehavior.floating,
         ),
       ),
       home: const SplashScreen(),
@@ -157,35 +147,14 @@ class KnockLogo extends StatelessWidget {
     return SizedBox(
       width: size,
       height: size,
-      child: CustomPaint(painter: _KnockLogoPainter()),
+      child: Image.asset(
+        'assets/icon.png',
+        width: size,
+        height: size,
+        fit: BoxFit.contain,
+      ),
     );
   }
-}
-
-class _KnockLogoPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final h = size.height;
-    final cx = w * 0.5;
-
-    // Symmetrical heart: bottom point, two rounded lobes at top
-    final path = Path();
-    path.moveTo(cx, h * 0.88);
-    path.cubicTo(cx - w * 0.5, h * 0.5, cx - w * 0.5, h * 0.05, cx, h * 0.3);
-    path.cubicTo(cx + w * 0.5, h * 0.05, cx + w * 0.5, h * 0.5, cx, h * 0.88);
-    path.close();
-
-    canvas.drawPath(
-      path,
-      Paint()
-        ..color = Colors.white
-        ..style = PaintingStyle.fill,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 // ===========================================================================
@@ -287,12 +256,12 @@ class _SplashScreenState extends State<SplashScreen>
                   ),
                 ),
                 const SizedBox(height: 8),
-                Text(
+                const Text(
                   'Tap into your circle',
                   style: TextStyle(
                     fontSize: 15,
-                    color: Colors.grey[400],
-                    letterSpacing: 1,
+                    color: _mutedTextColor,
+                    letterSpacing: 2,
                   ),
                 ),
               ],
@@ -474,8 +443,9 @@ class _SetupScreenState extends State<SetupScreen> {
           'display_name': name,
           'knock_code': userId,
         };
-        if (_selectedAvatar != null)
+        if (_selectedAvatar != null) {
           insertData['avatar_emoji'] = _selectedAvatar;
+        }
         await _sb.from('profiles').insert(insertData);
       } else {
         setState(() {
@@ -546,7 +516,7 @@ class _SetupScreenState extends State<SetupScreen> {
         const SizedBox(height: 8),
         Text(
           'Pick a username to get started',
-          style: TextStyle(fontSize: 16, color: Colors.grey[400]),
+          style: const TextStyle(fontSize: 16, color: _mutedTextColor),
         ),
         const SizedBox(height: 36),
         TextField(
@@ -560,24 +530,24 @@ class _SetupScreenState extends State<SetupScreen> {
           ),
           decoration: InputDecoration(
             hintText: 'Your name',
-            hintStyle: TextStyle(
-              color: Colors.grey[500],
+            hintStyle: const TextStyle(
+              color: _subtleTextColor,
               fontWeight: FontWeight.normal,
             ),
             filled: true,
-            fillColor: const Color(0xFF121212),
-            prefixIcon: Icon(Icons.person_outline, color: Colors.grey[400]),
+            fillColor: _cardColor,
+            prefixIcon: const Icon(Icons.person_outline, color: _mutedTextColor),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(16),
-              borderSide: BorderSide(color: Colors.grey[700]!),
+              borderSide: const BorderSide(color: _borderColor),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(16),
-              borderSide: BorderSide(color: Colors.grey[700]!),
+              borderSide: const BorderSide(color: _borderColor),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(16),
-              borderSide: const BorderSide(color: _primaryColor, width: 2),
+              borderSide: const BorderSide(color: Colors.white, width: 2),
             ),
           ),
         ),
@@ -595,11 +565,12 @@ class _SetupScreenState extends State<SetupScreen> {
           child: ElevatedButton(
             onPressed: _submitUsername,
             style: ElevatedButton.styleFrom(
-              backgroundColor: _primaryColor,
+              backgroundColor: _cardColorElevated,
               foregroundColor: Colors.white,
               elevation: 0,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
+                side: const BorderSide(color: _borderColor),
               ),
             ),
             child: const Text(
@@ -635,13 +606,13 @@ class _SetupScreenState extends State<SetupScreen> {
         // Preview avatar
         CircleAvatar(
           radius: 52,
-          backgroundColor: _primaryColor.withValues(alpha: 0.25),
+          backgroundColor: _cardColorAlt,
           child: Text(
             _selectedAvatar ?? displayInitial,
             style: TextStyle(
               fontSize: _selectedAvatar != null ? 44 : 38,
               fontWeight: FontWeight.bold,
-              color: _primaryColor,
+              color: Colors.white,
             ),
           ),
         ),
@@ -655,9 +626,9 @@ class _SetupScreenState extends State<SetupScreen> {
           ),
         ),
         const SizedBox(height: 6),
-        Text(
+        const Text(
           'Choose your profile picture',
-          style: TextStyle(fontSize: 15, color: Colors.grey[400]),
+          style: TextStyle(fontSize: 15, color: _mutedTextColor),
         ),
         const SizedBox(height: 32),
         Row(
@@ -679,17 +650,17 @@ class _SetupScreenState extends State<SetupScreen> {
                       height: 80,
                       decoration: BoxDecoration(
                         color: selected
-                            ? _primaryColor.withValues(alpha: 0.25)
-                            : const Color(0xFF121212),
+                            ? _cardColorElevated
+                            : _cardColor,
                         shape: BoxShape.circle,
                         border: Border.all(
-                          color: selected ? _primaryColor : Colors.grey[700]!,
+                          color: selected ? Colors.white : _borderColor,
                           width: selected ? 2.5 : 1.5,
                         ),
                         boxShadow: selected
                             ? [
                                 BoxShadow(
-                                  color: _primaryColor.withValues(alpha: 0.2),
+                                  color: Colors.white.withValues(alpha: 0.08),
                                   blurRadius: 12,
                                 ),
                               ]
@@ -703,7 +674,7 @@ class _SetupScreenState extends State<SetupScreen> {
                           fontWeight: isCustom
                               ? FontWeight.bold
                               : FontWeight.normal,
-                          color: isCustom ? _primaryColor : Colors.white,
+                          color: Colors.white,
                         ),
                       ),
                     ),
@@ -715,7 +686,7 @@ class _SetupScreenState extends State<SetupScreen> {
                         fontWeight: selected
                             ? FontWeight.w700
                             : FontWeight.w500,
-                        color: selected ? _primaryColor : Colors.grey[400],
+                        color: selected ? Colors.white : _mutedTextColor,
                       ),
                     ),
                   ],
@@ -738,11 +709,12 @@ class _SetupScreenState extends State<SetupScreen> {
           child: ElevatedButton(
             onPressed: _loading ? null : _createAccount,
             style: ElevatedButton.styleFrom(
-              backgroundColor: _primaryColor,
+              backgroundColor: _cardColorElevated,
               foregroundColor: Colors.white,
               elevation: 0,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
+                side: const BorderSide(color: _borderColor),
               ),
             ),
             child: _loading
@@ -772,10 +744,10 @@ class _SetupScreenState extends State<SetupScreen> {
                   setState(() => _selectedAvatar = null);
                   _createAccount();
                 },
-          child: Text(
+          child: const Text(
             'Skip for now',
             style: TextStyle(
-              color: Colors.grey[500],
+              color: _subtleTextColor,
               fontSize: 14,
               fontWeight: FontWeight.w500,
             ),
@@ -794,13 +766,14 @@ class _SetupScreenState extends State<SetupScreen> {
           width: 80,
           height: 80,
           decoration: BoxDecoration(
-            color: Colors.green.withValues(alpha: 0.2),
+            color: _cardColorElevated,
             borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: _borderColor),
           ),
           child: const Icon(
             Icons.check_circle_rounded,
             size: 44,
-            color: Colors.green,
+            color: Colors.white,
           ),
         ),
         const SizedBox(height: 24),
@@ -816,26 +789,26 @@ class _SetupScreenState extends State<SetupScreen> {
         Text(
           "Here's your personal Knock ID.\nShare it with friends to connect!",
           textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 15, color: Colors.grey[400], height: 1.5),
+          style: const TextStyle(fontSize: 15, color: _mutedTextColor, height: 1.5),
         ),
         const SizedBox(height: 32),
         Container(
           width: double.infinity,
           padding: const EdgeInsets.symmetric(vertical: 24),
           decoration: BoxDecoration(
-            color: const Color(0xFF121212),
+            color: _cardColor,
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.grey[700]!),
+            border: Border.all(color: _borderColor),
           ),
           child: Column(
             children: [
-              Text(
+              const Text(
                 'YOUR KNOCK ID',
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
                   letterSpacing: 3,
-                  color: Colors.grey[500],
+                  color: _subtleTextColor,
                 ),
               ),
               const SizedBox(height: 12),
@@ -872,11 +845,12 @@ class _SetupScreenState extends State<SetupScreen> {
           child: ElevatedButton(
             onPressed: _goToHome,
             style: ElevatedButton.styleFrom(
-              backgroundColor: _primaryColor,
+              backgroundColor: _cardColorElevated,
               foregroundColor: Colors.white,
               elevation: 0,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
+                side: const BorderSide(color: _borderColor),
               ),
             ),
             child: const Text(
@@ -1068,7 +1042,7 @@ class _HomeScreenState extends State<HomeScreen> {
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    backgroundColor: _primaryColor,
+                    backgroundColor: _cardColorElevated,
                     behavior: SnackBarBehavior.floating,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
@@ -1095,9 +1069,10 @@ class _HomeScreenState extends State<HomeScreen> {
       builder: (ctx) {
         final c = TextEditingController();
         return AlertDialog(
-          backgroundColor: const Color(0xFF121212),
+          backgroundColor: _cardColor,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
+            side: const BorderSide(color: _borderColor),
           ),
           title: const Text(
             'Add Friend',
@@ -1106,9 +1081,9 @@ class _HomeScreenState extends State<HomeScreen> {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
+              const Text(
                 "Enter your friend's Knock ID to connect",
-                style: TextStyle(color: Colors.grey[400], fontSize: 14),
+                style: TextStyle(color: _mutedTextColor, fontSize: 14),
               ),
               const SizedBox(height: 16),
               TextField(
@@ -1123,17 +1098,17 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 decoration: InputDecoration(
                   hintText: 'KNCK-XXXX',
-                  hintStyle: TextStyle(
-                    color: Colors.grey[500],
+                  hintStyle: const TextStyle(
+                    color: _subtleTextColor,
                     fontWeight: FontWeight.normal,
                     letterSpacing: 2,
                   ),
                   filled: true,
-                  fillColor: const Color(0xFF1E1E1E),
-                  prefixIcon: const Icon(Icons.tag, color: _primaryColor),
+                  fillColor: _cardColorAlt,
+                  prefixIcon: const Icon(Icons.tag, color: _mutedTextColor),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
-                    borderSide: BorderSide(color: Colors.grey[700]!),
+                    borderSide: const BorderSide(color: _borderColor),
                   ),
                 ),
               ),
@@ -1142,16 +1117,17 @@ class _HomeScreenState extends State<HomeScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: Text('Cancel', style: TextStyle(color: Colors.grey[400])),
+              child: const Text('Cancel', style: TextStyle(color: _mutedTextColor)),
             ),
             ElevatedButton(
               onPressed: () => Navigator.pop(ctx, c.text.trim().toUpperCase()),
               style: ElevatedButton.styleFrom(
-                backgroundColor: _primaryColor,
+                backgroundColor: _cardColorElevated,
                 foregroundColor: Colors.white,
                 elevation: 0,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
+                  side: const BorderSide(color: _borderColor),
                 ),
               ),
               child: const Text('Add'),
@@ -1210,7 +1186,7 @@ class _HomeScreenState extends State<HomeScreen> {
           SnackBar(
             content: Text('${profile['display_name'] ?? 'Friend'} added!'),
             behavior: SnackBarBehavior.floating,
-            backgroundColor: Colors.green,
+            backgroundColor: _cardColorElevated,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
             ),
@@ -1251,7 +1227,7 @@ class _HomeScreenState extends State<HomeScreen> {
           'KNOCK',
           style: TextStyle(
             fontWeight: FontWeight.w900,
-            letterSpacing: 4,
+            letterSpacing: 8,
             fontSize: 20,
             color: Colors.white,
           ),
@@ -1279,10 +1255,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       if (_myKnockId != null)
                         Text(
                           _myKnockId!,
-                          style: TextStyle(
+                          style: const TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w600,
-                            color: Colors.grey[500],
+                            color: _subtleTextColor,
                             letterSpacing: 1,
                           ),
                         ),
@@ -1291,13 +1267,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   const SizedBox(width: 10),
                   CircleAvatar(
                     radius: 18,
-                    backgroundColor: _primaryColor.withValues(alpha: 0.3),
+                    backgroundColor: _cardColorAlt,
                     child: Text(
                       _myAvatarEmoji ?? displayInitial,
                       style: TextStyle(
                         fontSize: _myAvatarEmoji != null ? 20 : 16,
                         fontWeight: FontWeight.bold,
-                        color: _primaryColor,
+                        color: Colors.white,
                       ),
                     ),
                   ),
@@ -1308,18 +1284,22 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: _primaryColor,
+        backgroundColor: _cardColorElevated,
         foregroundColor: Colors.white,
-        elevation: 2,
+        elevation: 0,
         onPressed: _addFriend,
         icon: const Icon(Icons.person_add_rounded),
         label: const Text(
           'Add Friend',
           style: TextStyle(fontWeight: FontWeight.w600),
         ),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: _borderColor),
+        ),
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator(color: _primaryColor))
+          ? const Center(child: CircularProgressIndicator(color: Colors.white))
           : _friends.isEmpty
           ? _buildEmptyState()
           : RefreshIndicator(
@@ -1368,14 +1348,14 @@ class _HomeScreenState extends State<HomeScreen> {
             width: 80,
             height: 80,
             decoration: BoxDecoration(
-              color: const Color(0xFF121212),
+              color: _cardColor,
               borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: Colors.grey[800]!),
+              border: Border.all(color: _borderColor),
             ),
-            child: Icon(
+            child: const Icon(
               Icons.people_outline_rounded,
               size: 40,
-              color: _primaryColor.withValues(alpha: 0.8),
+              color: _mutedTextColor,
             ),
           ),
           const SizedBox(height: 20),
@@ -1388,20 +1368,20 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           const SizedBox(height: 8),
-          Text(
+          const Text(
             'Tap "Add Friend" and enter their\nKnock ID to connect',
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 14, color: Colors.grey[400]),
+            style: TextStyle(fontSize: 14, color: _mutedTextColor),
           ),
           const SizedBox(height: 28),
           if (_myKnockId != null) ...[
-            Text(
+            const Text(
               'YOUR KNOCK ID',
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 3,
-                color: Colors.grey[500],
+                color: _subtleTextColor,
               ),
             ),
             const SizedBox(height: 8),
@@ -1421,27 +1401,27 @@ class _HomeScreenState extends State<HomeScreen> {
                   vertical: 12,
                 ),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF121212),
+                  color: _cardColor,
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: Colors.grey[700]!),
+                  border: Border.all(color: _borderColor),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
                       _myKnockId!,
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.w900,
                         letterSpacing: 3,
-                        color: _primaryColor,
+                        color: Colors.white,
                       ),
                     ),
                     const SizedBox(width: 10),
-                    Icon(
+                    const Icon(
                       Icons.copy_rounded,
                       size: 16,
-                      color: _primaryColor.withValues(alpha: 0.8),
+                      color: _mutedTextColor,
                     ),
                   ],
                 ),
@@ -1532,7 +1512,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           SnackBar(
             content: const Text('Profile updated!'),
             behavior: SnackBarBehavior.floating,
-            backgroundColor: Colors.green,
+            backgroundColor: _cardColorElevated,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
             ),
@@ -1561,7 +1541,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return Scaffold(
         backgroundColor: const Color(0xFF000000),
         body: const Center(
-          child: CircularProgressIndicator(color: _primaryColor),
+          child: CircularProgressIndicator(color: Colors.white),
         ),
       );
     }
@@ -1590,7 +1570,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       height: 18,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        color: _primaryColor,
+                        color: Colors.white,
                       ),
                     )
                   : const Text(
@@ -1616,13 +1596,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 children: [
                   CircleAvatar(
                     radius: 52,
-                    backgroundColor: _primaryColor.withValues(alpha: 0.25),
+                    backgroundColor: _cardColorAlt,
                     child: Text(
                       _avatarEmoji ?? displayInitial,
                       style: TextStyle(
                         fontSize: _avatarEmoji != null ? 44 : 38,
                         fontWeight: FontWeight.bold,
-                        color: _primaryColor,
+                        color: Colors.white,
                       ),
                     ),
                   ),
@@ -1633,7 +1613,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       width: 32,
                       height: 32,
                       decoration: BoxDecoration(
-                        color: _primaryColor,
+                        color: _cardColorElevated,
                         shape: BoxShape.circle,
                         border: Border.all(color: Colors.black, width: 2),
                       ),
@@ -1648,22 +1628,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
             const SizedBox(height: 8),
-            Text(
+            const Text(
               'Tap an avatar below to change',
-              style: TextStyle(fontSize: 13, color: Colors.grey[400]),
+              style: TextStyle(fontSize: 13, color: _mutedTextColor),
             ),
             const SizedBox(height: 32),
 
             // ---- Display name ----
             Align(
               alignment: Alignment.centerLeft,
-              child: Text(
+              child: const Text(
                 'DISPLAY NAME',
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
                   letterSpacing: 2,
-                  color: Colors.grey[500],
+                  color: _subtleTextColor,
                 ),
               ),
             ),
@@ -1677,19 +1657,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               decoration: InputDecoration(
                 filled: true,
-                fillColor: const Color(0xFF121212),
-                prefixIcon: Icon(Icons.person_outline, color: Colors.grey[400]),
+                fillColor: _cardColor,
+                prefixIcon: const Icon(Icons.person_outline, color: _mutedTextColor),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide(color: Colors.grey[700]!),
+                  borderSide: const BorderSide(color: _borderColor),
                 ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide(color: Colors.grey[700]!),
+                  borderSide: const BorderSide(color: _borderColor),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
-                  borderSide: const BorderSide(color: _primaryColor, width: 2),
+                  borderSide: const BorderSide(color: Colors.white, width: 2),
                 ),
               ),
             ),
@@ -1698,13 +1678,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
             // ---- Knock ID ----
             Align(
               alignment: Alignment.centerLeft,
-              child: Text(
+              child: const Text(
                 'YOUR KNOCK ID',
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
                   letterSpacing: 2,
-                  color: Colors.grey[500],
+                  color: _subtleTextColor,
                 ),
               ),
             ),
@@ -1713,13 +1693,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
               decoration: BoxDecoration(
-                color: const Color(0xFF121212),
+                color: _cardColor,
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: Colors.grey[700]!),
+                border: Border.all(color: _borderColor),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.tag, color: _primaryColor, size: 20),
+                  const Icon(Icons.tag, color: _mutedTextColor, size: 20),
                   const SizedBox(width: 10),
                   SelectableText(
                     _knockId ?? '------',
@@ -1727,13 +1707,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       fontSize: 22,
                       fontWeight: FontWeight.w900,
                       letterSpacing: 3,
-                      color: _primaryColor,
+                      color: Colors.white,
                     ),
                   ),
                   const Spacer(),
                   IconButton(
                     icon: const Icon(Icons.copy_rounded, size: 20),
-                    color: _primaryColor,
+                    color: _mutedTextColor,
                     onPressed: () {
                       Clipboard.setData(ClipboardData(text: _knockId ?? ''));
                       ScaffoldMessenger.of(context).showSnackBar(
@@ -1752,13 +1732,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
             // ---- Avatar picker ----
             Align(
               alignment: Alignment.centerLeft,
-              child: Text(
+              child: const Text(
                 'PROFILE PICTURE',
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
                   letterSpacing: 2,
-                  color: Colors.grey[500],
+                  color: _subtleTextColor,
                 ),
               ),
             ),
@@ -1787,20 +1767,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               height: 70,
                               decoration: BoxDecoration(
                                 color: selected
-                                    ? _primaryColor.withValues(alpha: 0.25)
-                                    : const Color(0xFF121212),
+                                    ? _cardColorElevated
+                                    : _cardColor,
                                 shape: BoxShape.circle,
                                 border: Border.all(
                                   color: selected
-                                      ? _primaryColor
-                                      : Colors.grey[700]!,
+                                      ? Colors.white
+                                      : _borderColor,
                                   width: selected ? 2.5 : 1.5,
                                 ),
                                 boxShadow: selected
                                     ? [
                                         BoxShadow(
-                                          color: _primaryColor.withValues(
-                                            alpha: 0.2,
+                                          color: Colors.white.withValues(
+                                            alpha: 0.08,
                                           ),
                                           blurRadius: 12,
                                         ),
@@ -1815,7 +1795,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                   fontWeight: isCustom
                                       ? FontWeight.bold
                                       : FontWeight.normal,
-                                  color: isCustom ? _primaryColor : null,
+                                  color: Colors.white,
                                 ),
                               ),
                             ),
@@ -1828,8 +1808,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                     ? FontWeight.w700
                                     : FontWeight.w500,
                                 color: selected
-                                    ? _primaryColor
-                                    : Colors.grey[600],
+                                    ? Colors.white
+                                    : _mutedTextColor,
                               ),
                             ),
                           ],
@@ -1887,21 +1867,21 @@ class _FriendCard extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: const Color(0xFF121212),
+          color: _cardColor,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white10, width: 1),
+          border: Border.all(color: _borderColor, width: 1),
         ),
         child: Row(
           children: [
             CircleAvatar(
               radius: 26,
-              backgroundColor: accentColor.withValues(alpha: 0.25),
+              backgroundColor: _cardColorAlt,
               child: Text(
                 name.isNotEmpty ? name[0].toUpperCase() : '?',
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
-                  color: accentColor,
+                  color: Colors.white,
                 ),
               ),
             ),
@@ -1921,7 +1901,7 @@ class _FriendCard extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(
                     subtitle,
-                    style: TextStyle(fontSize: 13, color: Colors.grey[400]),
+                    style: const TextStyle(fontSize: 13, color: _mutedTextColor),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -1933,10 +1913,10 @@ class _FriendCard extends StatelessWidget {
                 padding: const EdgeInsets.only(right: 8),
                 child: Text(
                   _formatTimestamp(lastMessageAt),
-                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                  style: const TextStyle(fontSize: 12, color: _subtleTextColor),
                 ),
               ),
-            Icon(Icons.chevron_right_rounded, color: Colors.grey[500]),
+            const Icon(Icons.chevron_right_rounded, color: _subtleTextColor),
           ],
         ),
       ),
@@ -1968,9 +1948,10 @@ class UserDetailScreen extends StatefulWidget {
 
 class _UserDetailScreenState extends State<UserDetailScreen> {
   List<Map<String, dynamic>> _knockHistory = [];
-  final _messageC = TextEditingController();
+  List<String> _customKnocks = [];
+  final _newKnockC = TextEditingController();
   StreamSubscription? _knockStreamSub;
-  bool _loading = true;
+  int _sendingIndex = -1; // which custom knock tile is animating
 
   static const _chatBg = Color(0xFF000000);
   static const _senderBubble = Color(0xFF1A1A1A);
@@ -1979,16 +1960,86 @@ class _UserDetailScreenState extends State<UserDetailScreen> {
   @override
   void initState() {
     super.initState();
-    _loadHistory();
+    _fetchCustomKnocks();
     _listenForKnocks();
   }
 
   @override
   void dispose() {
-    _messageC.dispose();
+    _newKnockC.dispose();
     _knockStreamSub?.cancel();
     super.dispose();
   }
+
+  // ---- Persistence (JSON array in custom_text column) ----
+
+  Future<void> _fetchCustomKnocks() async {
+    final uid = _uid;
+    if (uid == null) return;
+    try {
+      final conn = await _sb
+          .from('connections')
+          .select('custom_text')
+          .eq('user_id', uid)
+          .eq('friend_id', widget.friendId)
+          .maybeSingle();
+      if (conn == null || !mounted) return;
+      final raw = conn['custom_text'] as String?;
+      if (raw == null || raw.isEmpty) return;
+      setState(() {
+        try {
+          final decoded = jsonDecode(raw);
+          if (decoded is List) {
+            _customKnocks = decoded.cast<String>();
+          } else {
+            // backward compat: plain string → wrap in list
+            _customKnocks = [raw];
+          }
+        } catch (_) {
+          // Not valid JSON – treat as single legacy string
+          _customKnocks = [raw];
+        }
+      });
+    } catch (e) {
+      debugPrint('Fetch custom knocks error: $e');
+    }
+  }
+
+  Future<void> _saveKnocksList() async {
+    final uid = _uid;
+    if (uid == null) return;
+    final encoded = jsonEncode(_customKnocks);
+    await _sb
+        .from('connections')
+        .update({'custom_text': encoded})
+        .eq('user_id', uid)
+        .eq('friend_id', widget.friendId);
+  }
+
+  void _addKnock() {
+    final text = _newKnockC.text.trim();
+    if (text.isEmpty) return;
+    setState(() {
+      _customKnocks.add(text);
+      _newKnockC.clear();
+    });
+    _saveKnocksList();
+  }
+
+  void _removeKnock(int index) {
+    setState(() => _customKnocks.removeAt(index));
+    _saveKnocksList();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Custom knock removed'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  // ---- Listen to incoming knocks ----
 
   void _listenForKnocks() {
     final uid = _uid;
@@ -1998,99 +2049,36 @@ class _UserDetailScreenState extends State<UserDetailScreen> {
         .stream(primaryKey: ['id'])
         .eq('receiver_id', uid)
         .listen((rows) {
-          for (final r in rows) {
-            if (r['sender_id'] == widget.friendId && mounted) {
-              _loadHistory();
-              break;
-            }
-          }
+          if (mounted) setState(() => _knockHistory = rows);
         });
   }
 
-  Future<void> _loadHistory() async {
+  // ---- Send a knock (one-tap) ----
+
+  Future<void> _sendKnock(String message, int tileIndex) async {
     final uid = _uid;
-    if (uid == null) {
-      setState(() => _loading = false);
-      return;
-    }
-    try {
-      final sent = await _sb
-          .from('knocks')
-          .select('message, created_at')
-          .eq('sender_id', uid)
-          .eq('receiver_id', widget.friendId)
-          .order('created_at', ascending: true);
-      final received = await _sb
-          .from('knocks')
-          .select('message, created_at')
-          .eq('sender_id', widget.friendId)
-          .eq('receiver_id', uid)
-          .order('created_at', ascending: true);
-
-      final List<Map<String, dynamic>> combined = [];
-      int si = 0, ri = 0;
-      while (si < sent.length || ri < received.length) {
-        final st = si < sent.length
-            ? DateTime.tryParse(sent[si]['created_at'] as String? ?? '')
-            : null;
-        final rt = ri < received.length
-            ? DateTime.tryParse(received[ri]['created_at'] as String? ?? '')
-            : null;
-        if (st != null && (rt == null || st.isBefore(rt))) {
-          combined.add({...sent[si], 'is_from_me': true});
-          si++;
-        } else if (rt != null) {
-          combined.add({...received[ri], 'is_from_me': false});
-          ri++;
-        }
-      }
-
-      if (mounted) {
-        setState(() {
-          _knockHistory = combined;
-          _loading = false;
-        });
-      }
-    } catch (e) {
-      debugPrint('Load history error: $e');
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _sendKnock() async {
-    final message = _messageC.text.trim();
-    if (message.isEmpty) return;
-    final uid = _uid;
-    if (uid == null) return;
-
+    if (uid == null || message.isEmpty) return;
+    setState(() => _sendingIndex = tileIndex);
     HapticFeedback.heavyImpact();
-    _messageC.clear();
-
     try {
       await _sb.from('knocks').insert({
         'sender_id': uid,
         'receiver_id': widget.friendId,
         'message': message,
       });
-      final createdAt = DateTime.now().toIso8601String();
-      if (mounted) {
-        setState(() {
-          _knockHistory = [
-            ..._knockHistory,
-            {'message': message, 'created_at': createdAt, 'is_from_me': true},
-          ];
-        });
-      }
-      debugPrint('Knock sent to ${widget.name}: $message');
     } catch (e) {
       debugPrint('Send error: $e');
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Failed to send: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to send: $e')),
+        );
       }
     }
+    await Future.delayed(const Duration(milliseconds: 250));
+    if (mounted) setState(() => _sendingIndex = -1);
   }
+
+  // ---- UI ----
 
   @override
   Widget build(BuildContext context) {
@@ -2106,102 +2094,238 @@ class _UserDetailScreenState extends State<UserDetailScreen> {
         ),
         centerTitle: true,
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator(color: _primaryColor))
-          : Column(
-              children: [
-                Expanded(
-                  child: _knockHistory.isEmpty
-                      ? Center(
-                          child: Text(
-                            'Send your first knock',
-                            style: TextStyle(
-                              fontSize: 16,
-                              color: Colors.grey[500],
+      body: Column(
+        children: [
+          // ---- Knock history (chat bubbles) ----
+          Expanded(
+            child: _knockHistory.isEmpty
+                ? const Center(
+                    child: Text(
+                      'Send your first knock',
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: _mutedTextColor,
+                      ),
+                    ),
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
+                    itemCount: _knockHistory.length,
+                    itemBuilder: (context, i) {
+                      final k = _knockHistory[i];
+                      final isMe = k['sender_id'] == _uid;
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Row(
+                          mainAxisAlignment: isMe
+                              ? MainAxisAlignment.end
+                              : MainAxisAlignment.start,
+                          children: [
+                            Container(
+                              constraints: BoxConstraints(
+                                maxWidth:
+                                    MediaQuery.of(context).size.width * 0.72,
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 10,
+                              ),
+                              decoration: BoxDecoration(
+                                color: isMe
+                                    ? _senderBubble
+                                    : _receiverBubble,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: _borderColor,
+                                  width: 1,
+                                ),
+                              ),
+                              child: Text(
+                                k['message'] as String? ?? '',
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  color: Colors.white,
+                                ),
+                              ),
                             ),
-                          ),
-                        )
-                      : ListView.builder(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 12,
-                          ),
-                          itemCount: _knockHistory.length,
-                          itemBuilder: (context, i) {
-                            final k = _knockHistory[i];
-                            final isMe = k['is_from_me'] as bool? ?? false;
-                            return Padding(
-                              padding: const EdgeInsets.only(bottom: 8),
-                              child: Row(
-                                mainAxisAlignment: isMe
-                                    ? MainAxisAlignment.end
-                                    : MainAxisAlignment.start,
-                                children: [
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 14,
-                                      vertical: 10,
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+          ),
+
+          // ---- Custom knocks panel ----
+          Container(
+            width: double.infinity,
+            decoration: const BoxDecoration(
+              color: _cardColor,
+              border: Border(
+                top: BorderSide(color: _borderColor, width: 1),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Header
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(20, 16, 20, 8),
+                  child: Text(
+                    'CUSTOM KNOCKS',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 3,
+                      color: _subtleTextColor,
+                    ),
+                  ),
+                ),
+
+                // Tiles
+                if (_customKnocks.isNotEmpty)
+                  Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: List.generate(_customKnocks.length, (i) {
+                        final msg = _customKnocks[i];
+                        final isSending = _sendingIndex == i;
+                        return AnimatedScale(
+                          scale: isSending ? 1.08 : 1.0,
+                          duration: const Duration(milliseconds: 180),
+                          curve: Curves.easeOut,
+                          child: Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: isSending
+                                  ? null
+                                  : () => _sendKnock(msg, i),
+                              onLongPress: () => _removeKnock(i),
+                              borderRadius: BorderRadius.circular(14),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 12,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: _cardColorElevated,
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(
+                                    color: isSending
+                                        ? Colors.white
+                                        : _borderColor,
+                                    width: 1,
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(
+                                      Icons.touch_app_rounded,
+                                      size: 16,
+                                      color: _mutedTextColor,
                                     ),
-                                    decoration: BoxDecoration(
-                                      color: isMe
-                                          ? _senderBubble
-                                          : _receiverBubble,
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(
-                                        color: Colors.white10,
-                                        width: 1,
-                                      ),
-                                    ),
-                                    child: Text(
-                                      k['message'] as String? ?? '',
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      msg,
                                       style: const TextStyle(
-                                        fontSize: 15,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
                                         color: Colors.white,
                                       ),
                                     ),
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
-                            );
-                          },
-                        ),
-                ),
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: const BoxDecoration(
-                    color: Color(0xFF1A1A1A),
-                    border: Border(top: BorderSide(color: Colors.white10)),
+                            ),
+                          ),
+                        );
+                      }),
+                    ),
                   ),
+
+                if (_customKnocks.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                    child: Text(
+                      'Add a custom knock to send with one tap',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: _subtleTextColor,
+                      ),
+                    ),
+                  ),
+
+                // Add-knock input row
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
                   child: Row(
                     children: [
                       Expanded(
                         child: TextField(
-                          controller: _messageC,
-                          style: const TextStyle(color: Colors.white),
+                          controller: _newKnockC,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                          ),
+                          textInputAction: TextInputAction.done,
+                          onSubmitted: (_) => _addKnock(),
                           decoration: InputDecoration(
-                            hintText: 'Set Custom Knock...',
-                            hintStyle: TextStyle(color: Colors.grey[500]),
-                            filled: true,
-                            fillColor: const Color(0xFF121212),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(24),
-                              borderSide: BorderSide.none,
+                            hintText: 'e.g. Drink Water, Take Medicine...',
+                            hintStyle: const TextStyle(
+                              color: _subtleTextColor,
+                              fontSize: 14,
                             ),
+                            filled: true,
+                            fillColor: _cardColorAlt,
                             contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 20,
+                              horizontal: 16,
                               vertical: 12,
                             ),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(14),
+                              borderSide:
+                                  const BorderSide(color: _borderColor),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(14),
+                              borderSide:
+                                  const BorderSide(color: _borderColor),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(14),
+                              borderSide: const BorderSide(
+                                color: Colors.white,
+                                width: 2,
+                              ),
+                            ),
                           ),
-                          onSubmitted: (_) => _sendKnock(),
                         ),
                       ),
-                      const SizedBox(width: 12),
-                      IconButton.filled(
-                        onPressed: _sendKnock,
-                        icon: const Icon(Icons.send_rounded),
-                        style: IconButton.styleFrom(
-                          backgroundColor: _primaryColor,
-                          foregroundColor: Colors.white,
+                      const SizedBox(width: 10),
+                      SizedBox(
+                        height: 48,
+                        child: ElevatedButton(
+                          onPressed: _addKnock,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _cardColorElevated,
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 18,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                              side: const BorderSide(color: _borderColor),
+                            ),
+                          ),
+                          child: const Icon(Icons.add_rounded, size: 22),
                         ),
                       ),
                     ],
@@ -2209,6 +2333,9 @@ class _UserDetailScreenState extends State<UserDetailScreen> {
                 ),
               ],
             ),
+          ),
+        ],
+      ),
     );
   }
 }
