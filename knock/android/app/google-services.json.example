@@ -1,21 +1,21 @@
 {
   "project_info": {
-    "project_number": "749827294614",
-    "project_id": "knock-2feab",
-    "storage_bucket": "knock-2feab.firebasestorage.app"
+    "project_number": "YOUR_PROJECT_NUMBER",
+    "project_id": "YOUR_PROJECT_ID",
+    "storage_bucket": "YOUR_PROJECT_ID.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:749827294614:android:3d33c1c54b1ce7c8ce49b7",
+        "mobilesdk_app_id": "YOUR_MOBILE_SDK_APP_ID",
         "android_client_info": {
-          "package_name": "com.android.application"
+          "package_name": "com.example.knock"
         }
       },
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyAx6XHw4VDjJDLck0WE2VW54iAImRCDwKQ"
+          "current_key": "YOUR_GOOGLE_API_KEY"
         }
       ],
       "services": {

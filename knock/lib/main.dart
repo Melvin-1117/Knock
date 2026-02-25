@@ -1,12 +1,14 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -41,6 +43,20 @@ const _mutedTextColor = Color(0xFF9E9E9E);
 
 SupabaseClient get _sb => Supabase.instance.client;
 String? get _uid => _sb.auth.currentUser?.id;
+
+// For showing notifications when FCM message arrives (foreground + heads-up)
+const AndroidNotificationChannel _knockChannel = AndroidNotificationChannel(
+  'knock_channel',
+  'Knocks',
+  description: 'Incoming knock notifications',
+  importance: Importance.max,
+  playSound: true,
+  enableVibration: true,
+  showBadge: true,
+);
+
+final FlutterLocalNotificationsPlugin _localNotifications =
+    FlutterLocalNotificationsPlugin();
 
 Color _colorForIndex(int i) => _accentColors[i % _accentColors.length];
 
@@ -86,21 +102,166 @@ class KnockRelationship {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
+  // Firebase is configured for Android/iOS only; skip on web to avoid blank screen in Edge/browser
+  if (!kIsWeb) {
+    await Firebase.initializeApp();
+    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+    await _initLocalNotifications();
+  }
   await Supabase.initialize(url: _supabaseUrl, anonKey: _supabaseAnonKey);
-
-  // FCM setup
-  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
   runApp(const KnockApp());
+}
 
+Future<void> _initLocalNotifications() async {
+  const android = AndroidInitializationSettings('@mipmap/ic_launcher');
+  const initSettings = InitializationSettings(android: android);
+  await _localNotifications.initialize(
+    initSettings,
+    onDidReceiveNotificationResponse: (_) {},
+  );
+  await _localNotifications
+      .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>()
+      ?.createNotificationChannel(_knockChannel);
 }
 
 // FCM background handler
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
-  // You can handle background messages here
-  print('Handling a background message: ${message.messageId}');
+  debugPrint('FCM: Handling a background message: ${message.messageId}');
 }
+
+/// Saves the current FCM token to the user's profile in Supabase (call when signed in).
+/// Used by onTokenRefresh and after initial permission grant. Skips on web/emulator (no token).
+Future<void> saveFcmTokenToSupabase() async {
+  if (kIsWeb) {
+    debugPrint('FCM: Skipping save (web)');
+    return;
+  }
+  final user = Supabase.instance.client.auth.currentUser;
+  if (user == null) {
+    debugPrint('FCM: Skipping save - no logged-in user');
+    return;
+  }
+  final uid = user.id;
+  try {
+    final token = await FirebaseMessaging.instance.getToken();
+    if (token == null || token.isEmpty) {
+      debugPrint('FCM: No token available (common on emulator)');
+      return;
+    }
+    await _sb.from('profiles').update({'fcm_token': token}).eq('id', uid);
+    debugPrint('FCM: Token saved to Supabase for user $uid');
+  } catch (e) {
+    debugPrint('FCM: Save token error: $e');
+  }
+}
+
+/// Requests notification permission, gets FCM token, and saves to Supabase.
+/// Call after successful login and when home screen loads. Works only on real devices
+/// (emulators typically do not provide a valid FCM token).
+Future<void> requestFcmPermissionAndSaveToken() async {
+  if (kIsWeb) {
+    debugPrint('FCM: Skipping (web)');
+    return;
+  }
+  final user = Supabase.instance.client.auth.currentUser;
+  if (user == null) {
+    debugPrint('FCM: No current user, skipping permission request');
+    return;
+  }
+  try {
+    final messaging = FirebaseMessaging.instance;
+    debugPrint('FCM: Requesting notification permission...');
+    final settings = await messaging.requestPermission();
+    if (settings.authorizationStatus == AuthorizationStatus.denied) {
+      debugPrint('FCM: Permission denied');
+      return;
+    }
+    if (settings.authorizationStatus == AuthorizationStatus.provisional) {
+      debugPrint('FCM: Permission provisional (iOS)');
+    }
+    debugPrint('FCM: Permission granted, getting token...');
+    final token = await messaging.getToken();
+    if (token == null || token.isEmpty) {
+      debugPrint('FCM: No token (emulator or unsupported environment)');
+      return;
+    }
+    final uid = Supabase.instance.client.auth.currentUser!.id;
+    await _sb.from('profiles').update({'fcm_token': token}).eq('id', uid);
+    debugPrint('FCM: Token saved to profiles.fcm_token for user $uid');
+  } catch (e) {
+    debugPrint('FCM: requestFcmPermissionAndSaveToken error: $e');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// FCM foreground handler widget
+// ---------------------------------------------------------------------------
+
+class FcmHandler extends StatefulWidget {
+  final Widget child;
+  const FcmHandler({required this.child, super.key});
+
+  @override
+  State<FcmHandler> createState() => _FcmHandlerState();
+}
+
+class _FcmHandlerState extends State<FcmHandler> {
+  @override
+  void initState() {
+    super.initState();
+    _initFcm();
+  }
+
+  Future<void> _initFcm() async {
+    if (kIsWeb) return; // FCM not set up for web; use mobile for push
+    // Permission + get token + save are done after login in HomeScreen (requestFcmPermissionAndSaveToken).
+    // Here we only set up listeners for foreground messages and token refresh.
+    FirebaseMessaging.instance.onTokenRefresh.listen((_) {
+      debugPrint('FCM: Token refreshed');
+      saveFcmTokenToSupabase();
+    });
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      debugPrint('FCM: Foreground message: ${message.messageId}');
+      _showForegroundNotification(message);
+    });
+    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+      debugPrint('FCM: App opened from notification: ${message.messageId}');
+    });
+  }
+
+  Future<void> _showForegroundNotification(RemoteMessage message) async {
+    final notification = message.notification;
+    final title = notification?.title ?? 'Knock';
+    final body = notification?.body ??
+        message.data['body'] ??
+        message.data['message'] ??
+        'New knock';
+    final details = AndroidNotificationDetails(
+      _knockChannel.id,
+      _knockChannel.name,
+      channelDescription: _knockChannel.description,
+      importance: Importance.max,
+      priority: Priority.max,
+      playSound: true,
+      enableVibration: true,
+      visibility: NotificationVisibility.public,
+      category: AndroidNotificationCategory.message,
+    );
+    await _localNotifications.show(
+      message.hashCode % 100000,
+      title,
+      body,
+      NotificationDetails(android: details),
+    );
+  }
+
+
+  @override
+  Widget build(BuildContext context) {
+    return widget.child;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -108,55 +269,13 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 // ---------------------------------------------------------------------------
 
 class KnockApp extends StatelessWidget {
-  // FCM foreground handler widget
-  class FcmHandler extends StatefulWidget {
-    final Widget child;
-    const FcmHandler({required this.child, super.key});
-
-    @override
-    State<FcmHandler> createState() => _FcmHandlerState();
-  }
-
-  class _FcmHandlerState extends State<FcmHandler> {
-    @override
-    void initState() {
-      super.initState();
-      _initFcm();
-    }
-
-    Future<void> _initFcm() async {
-      FirebaseMessaging messaging = FirebaseMessaging.instance;
-      NotificationSettings settings = await messaging.requestPermission();
-      print('FCM permission: ${settings.authorizationStatus}');
-
-      // Get FCM token
-      String? token = await messaging.getToken();
-      print('FCM Token: $token');
-
-      // Listen for foreground messages
-      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-        print('Received a foreground message: ${message.messageId}');
-        // TODO: Show notification or handle message
-      });
-      // Listen for messages when app is opened from notification
-      FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-        print('App opened from notification: ${message.messageId}');
-        // TODO: Handle navigation or logic
-      });
-    }
-
-    @override
-    Widget build(BuildContext context) {
-      return widget.child;
-    }
-  }
   const KnockApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return FcmHandler(
       child: MaterialApp(
-      debugShowCheckedModeBanner: false,
+        debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
         brightness: Brightness.dark,
@@ -188,7 +307,8 @@ class KnockApp extends StatelessWidget {
           behavior: SnackBarBehavior.floating,
         ),
       ),
-      home: const SplashScreen(),
+        home: const SplashScreen(),
+      ),
     );
   }
 }
@@ -199,7 +319,7 @@ class KnockApp extends StatelessWidget {
 
 class KnockLogo extends StatelessWidget {
   final double size;
-  const KnockLogo({super.key, this.size = 120});
+  const KnockLogo({super.key, this.size = 110});
 
   @override
   Widget build(BuildContext context) {
@@ -269,8 +389,8 @@ class _SplashScreenState extends State<SplashScreen>
       debugPrint('Splash auth error: $e');
     }
 
-    // Ensure splash shows for at least 2.5 seconds
-    await Future.delayed(const Duration(milliseconds: 2500));
+    // Very brief splash so animation is visible
+    await Future.delayed(const Duration(milliseconds: 800));
 
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
@@ -789,6 +909,8 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadFriends();
     _listenForKnocks();
     _listenForConnections();
+    // After successful login and when home loads: request permission, get FCM token, save to Supabase (real devices only).
+    requestFcmPermissionAndSaveToken();
   }
 
   @override
@@ -1243,11 +1365,95 @@ class _HomeScreenState extends State<HomeScreen> {
                     accentColor: color,
                     lastMessage: lastMsg,
                     lastMessageAt: lastAt,
+                    onRemove: () => _confirmRemoveFriend(friendId, name),
                   );
                 },
               ),
             ),
     );
+  }
+
+  Future<void> _confirmRemoveFriend(String friendId, String name) async {
+    final shouldRemove = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: _cardColor,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: const BorderSide(color: _borderColor),
+          ),
+          title: const Text(
+            'Remove friend?',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+          content: Text(
+            'This will remove $name from your friends list.',
+            style: const TextStyle(color: _mutedTextColor, fontSize: 14),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text(
+                'Cancel',
+                style: TextStyle(color: _mutedTextColor),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _cardColorElevated,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: const BorderSide(color: _borderColor),
+                ),
+              ),
+              child: const Text('Remove'),
+            ),
+          ],
+        );
+      },
+    );
+    if (shouldRemove != true) return;
+    await _removeFriend(friendId, name);
+  }
+
+  Future<void> _removeFriend(String friendId, String name) async {
+    final uid = _uid;
+    if (uid == null) return;
+    try {
+      await _sb.rpc('remove_mutual_connection', params: {'p_friend_id': friendId});
+      setState(() {
+        _friends.removeWhere((f) => f['friend_id'] == friendId);
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Removed $name'),
+            behavior: SnackBarBehavior.floating,
+            backgroundColor: _cardColorElevated,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Remove friend error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error removing $name: $e'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
   }
 
   Widget _buildEmptyState() {
@@ -1748,6 +1954,7 @@ class _FriendCard extends StatelessWidget {
     required this.accentColor,
     this.lastMessage,
     this.lastMessageAt,
+    required this.onRemove,
   });
 
   final String name;
@@ -1756,6 +1963,7 @@ class _FriendCard extends StatelessWidget {
   final Color accentColor;
   final String? lastMessage;
   final DateTime? lastMessageAt;
+  final VoidCallback onRemove;
 
   @override
   Widget build(BuildContext context) {
@@ -1818,6 +2026,14 @@ class _FriendCard extends StatelessWidget {
                   ),
                 ],
               ),
+            ),
+            IconButton(
+              icon: const Icon(
+                Icons.person_remove_alt_1_rounded,
+                color: _subtleTextColor,
+              ),
+              tooltip: 'Remove friend',
+              onPressed: onRemove,
             ),
             if (lastMessageAt != null)
               Padding(
