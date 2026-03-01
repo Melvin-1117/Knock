@@ -307,7 +307,7 @@ class KnockApp extends StatelessWidget {
           behavior: SnackBarBehavior.floating,
         ),
       ),
-        home: const SplashScreen(),
+        home: const AppGate(),
       ),
     );
   }
@@ -346,30 +346,15 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _ctrl;
-  late Animation<double> _fadeIn;
-  late Animation<double> _scale;
-
+class _SplashScreenState extends State<SplashScreen> {
   @override
   void initState() {
     super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1200),
-    );
-    _fadeIn = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
-    _scale = Tween<double>(
-      begin: 0.8,
-      end: 1.0,
-    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.elasticOut));
-    _ctrl.forward();
     _navigate();
   }
 
   Future<void> _navigate() async {
-    // Run auth + profile check in parallel with the splash animation
+    // Run auth + profile check with no artificial delay
     bool hasProfile = false;
     try {
       if (_uid == null) {
@@ -389,9 +374,6 @@ class _SplashScreenState extends State<SplashScreen>
       debugPrint('Splash auth error: $e');
     }
 
-    // Very brief splash so animation is visible
-    await Future.delayed(const Duration(milliseconds: 800));
-
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
@@ -399,54 +381,40 @@ class _SplashScreenState extends State<SplashScreen>
             hasProfile ? const HomeScreen() : SetupScreen(onComplete: () {}),
         transitionsBuilder: (_, anim, __, child) =>
             FadeTransition(opacity: anim, child: child),
-        transitionDuration: const Duration(milliseconds: 500),
+        transitionDuration: const Duration(milliseconds: 300),
       ),
     );
   }
 
   @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
+    // Unified splash: logo centered + app name at the bottom (Instagram-style).
     return Scaffold(
       backgroundColor: const Color(0xFF000000),
-      body: Center(
-        child: FadeTransition(
-          opacity: _fadeIn,
-          child: ScaleTransition(
-            scale: _scale,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // App logo
-                const KnockLogo(size: 120),
-                const SizedBox(height: 28),
-                const Text(
-                  'KNOCK',
-                  style: TextStyle(
-                    fontSize: 36,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 8,
-                    color: Colors.white,
-                  ),
+      body: Stack(
+        children: [
+          // Logo centered on screen
+          const Center(
+            child: KnockLogo(size: 120),
+          ),
+          // App name at the bottom
+          const Positioned(
+            left: 0,
+            right: 0,
+            bottom: 48,
+            child: Center(
+              child: Text(
+                'KNOCK',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 6,
+                  color: Color(0xFF757575),
                 ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Tap into your circle',
-                  style: TextStyle(
-                    fontSize: 15,
-                    color: _mutedTextColor,
-                    letterSpacing: 2,
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -521,8 +489,30 @@ class _AppGateState extends State<AppGate> {
   @override
   Widget build(BuildContext context) {
     if (_checking) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator(color: _primaryColor)),
+      // Branded loading screen matching the native splash
+      return Scaffold(
+        backgroundColor: const Color(0xFF000000),
+        body: Stack(
+          children: [
+            const Center(child: KnockLogo(size: 120)),
+            const Positioned(
+              left: 0,
+              right: 0,
+              bottom: 48,
+              child: Center(
+                child: Text(
+                  'KNOCK',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 6,
+                    color: Color(0xFF757575),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       );
     }
     if (_hasProfile) return const HomeScreen();
@@ -897,7 +887,7 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Map<String, dynamic>> _friends = [];
   bool _loading = true;
   StreamSubscription? _knockSub;
-  StreamSubscription? _connectionsSub;
+  RealtimeChannel? _connectionsChannel;
   String? _myKnockId;
   String? _myDisplayName;
   String? _myAvatarEmoji;
@@ -916,23 +906,35 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _knockSub?.cancel();
-    _connectionsSub?.cancel();
+    if (_connectionsChannel != null) {
+      _sb.removeChannel(_connectionsChannel!);
+    }
     super.dispose();
   }
 
   void _listenForConnections() {
     final uid = _uid;
     if (uid == null) return;
-    _connectionsSub = _sb
-        .from('connections')
-        .stream(primaryKey: ['id'])
-        .eq('user_id', uid)
-        .listen((_) {
-          // Small delay so the profile join data is available
-          Future.delayed(const Duration(milliseconds: 500), () {
-            if (mounted) _loadFriends();
-          });
-        });
+    _connectionsChannel = _sb.channel('connections_realtime_$uid')
+      ..onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public',
+        table: 'connections',
+        callback: (payload) {
+          // Reload friends when any connection row involving this user changes
+          final record = payload.newRecord.isNotEmpty
+              ? payload.newRecord
+              : payload.oldRecord;
+          final rowUserId = record['user_id'] as String?;
+          final rowFriendId = record['friend_id'] as String?;
+          if (rowUserId == uid || rowFriendId == uid) {
+            Future.delayed(const Duration(milliseconds: 300), () {
+              if (mounted) _loadFriends();
+            });
+          }
+        },
+      )
+      ..subscribe();
   }
 
   Future<void> _loadProfile() async {
@@ -2197,10 +2199,9 @@ class _UserDetailScreenState extends State<UserDetailScreen> {
     setState(() => _sendingIndex = tileIndex);
     HapticFeedback.heavyImpact();
     try {
-      await _sb.from('knocks').insert({
-        'sender_id': uid,
-        'receiver_id': widget.friendId,
-        'message': message,
+      await _sb.rpc('send_knock_safe', params: {
+        'p_receiver_id': widget.friendId,
+        'p_message': message,
       });
       if (mounted) {
         ScaffoldMessenger.of(context).clearSnackBars();
@@ -2230,6 +2231,25 @@ class _UserDetailScreenState extends State<UserDetailScreen> {
       }
     } catch (e) {
       debugPrint('Send error: $e');
+      final errorStr = e.toString().toLowerCase();
+      if (mounted && errorStr.contains('no connection exists')) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+              'This user is no longer in your friends list',
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+            ),
+            backgroundColor: _cardColorElevated,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+        Navigator.of(context).pop();
+        return;
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to send: $e')),
