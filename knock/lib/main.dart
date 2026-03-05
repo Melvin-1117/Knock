@@ -534,11 +534,86 @@ class SetupScreen extends StatefulWidget {
 
 class _SetupScreenState extends State<SetupScreen> {
   final _usernameC = TextEditingController();
+  final _knockIdC = TextEditingController();
   bool _loading = false;
   String? _error;
   String? _generatedId;
   String? _selectedAvatar;
-  int _step = 0; // 0 = username, 1 = knock ID card
+  int _step = 0; // 0 = login/signup, 1 = knock ID card (after signup)
+  bool _isSignupMode = false;
+
+  Future<void> _loginWithKnockId() async {
+    final knockId = _knockIdC.text.trim().toUpperCase();
+    if (knockId.isEmpty) {
+      setState(() => _error = 'Please enter your Knock ID');
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final result = await _sb.rpc(
+        'get_auth_email_by_knock_code',
+        params: {'p_knock_code': knockId},
+      );
+      final email = result as String?;
+      if (email == null || email.isEmpty) {
+        setState(() {
+          _error = 'No account found for that Knock ID';
+          _loading = false;
+        });
+        return;
+      }
+      const pass = 'KnockAutoPass2026!';
+      await _sb.auth.signInWithPassword(email: email, password: pass);
+      final uid = _uid;
+      if (uid == null) {
+        setState(() {
+          _error = 'Login failed. Please try again.';
+          _loading = false;
+        });
+        return;
+      }
+      final profile = await _sb
+          .from('profiles')
+          .select()
+          .eq('id', uid)
+          .maybeSingle();
+      if (profile == null) {
+        setState(() {
+          _error = 'Account found but profile missing. Contact support.';
+          _loading = false;
+        });
+        return;
+      }
+      if (!kIsWeb) {
+        try {
+          final messaging = FirebaseMessaging.instance;
+          final settings = await messaging.requestPermission();
+          if (settings.authorizationStatus != AuthorizationStatus.denied) {
+            final fcmToken = await messaging.getToken();
+            if (fcmToken != null && fcmToken.isNotEmpty) {
+              await _sb.from('profiles').update({'fcm_token': fcmToken}).eq('id', uid);
+              debugPrint('FCM: Token saved during login');
+            }
+          }
+        } catch (e) {
+          debugPrint('FCM: Could not save token during login: $e');
+        }
+      }
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const HomeScreen()),
+      );
+    } catch (e) {
+      debugPrint('Login error: $e');
+      setState(() {
+        _error = 'Login failed. Check your Knock ID and try again.';
+        _loading = false;
+      });
+    }
+  }
 
   Future<void> _submitUsername() async {
     final name = _usernameC.text.trim();
@@ -613,6 +688,24 @@ class _SetupScreenState extends State<SetupScreen> {
         if (_selectedAvatar != null) {
           insertData['avatar_emoji'] = _selectedAvatar;
         }
+
+        // Get FCM token early so it's saved with the profile insert
+        if (!kIsWeb) {
+          try {
+            final messaging = FirebaseMessaging.instance;
+            final settings = await messaging.requestPermission();
+            if (settings.authorizationStatus != AuthorizationStatus.denied) {
+              final fcmToken = await messaging.getToken();
+              if (fcmToken != null && fcmToken.isNotEmpty) {
+                insertData['fcm_token'] = fcmToken;
+                debugPrint('FCM: Token obtained during signup for insert');
+              }
+            }
+          } catch (e) {
+            debugPrint('FCM: Could not get token during signup: $e');
+          }
+        }
+
         await _sb.from('profiles').insert(insertData);
       } else {
         setState(() {
@@ -654,7 +747,7 @@ class _SetupScreenState extends State<SetupScreen> {
             child: AnimatedSwitcher(
               duration: const Duration(milliseconds: 400),
               child: _step == 0
-                  ? _buildUsernameStep()
+                  ? (_isSignupMode ? _buildSignupStep() : _buildLoginStep())
                   : _buildIdCard(),
             ),
           ),
@@ -663,15 +756,137 @@ class _SetupScreenState extends State<SetupScreen> {
     );
   }
 
-  Widget _buildUsernameStep() {
+  Widget _buildLoginStep() {
     return Column(
-      key: const ValueKey('step0'),
+      key: const ValueKey('login'),
       mainAxisSize: MainAxisSize.min,
       children: [
         const KnockLogo(size: 90),
         const SizedBox(height: 28),
         const Text(
           'Welcome to Knock!',
+          style: TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.w900,
+            color: Colors.white,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Enter your Knock ID to log in',
+          style: const TextStyle(fontSize: 16, color: _mutedTextColor),
+        ),
+        const SizedBox(height: 36),
+        TextField(
+          controller: _knockIdC,
+          autofocus: true,
+          textCapitalization: TextCapitalization.characters,
+          style: const TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 3,
+            color: Colors.white,
+          ),
+          decoration: InputDecoration(
+            hintText: 'KNCK-XXXX',
+            hintStyle: const TextStyle(
+              color: _subtleTextColor,
+              fontWeight: FontWeight.normal,
+              letterSpacing: 3,
+            ),
+            filled: true,
+            fillColor: _cardColor,
+            prefixIcon: const Icon(Icons.vpn_key_rounded, color: _mutedTextColor),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: const BorderSide(color: _borderColor),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: const BorderSide(color: _borderColor),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: const BorderSide(color: Colors.white, width: 2),
+            ),
+          ),
+        ),
+        if (_error != null) ...[
+          const SizedBox(height: 12),
+          Text(
+            _error!,
+            style: const TextStyle(color: Colors.redAccent, fontSize: 14),
+          ),
+        ],
+        const SizedBox(height: 24),
+        SizedBox(
+          width: double.infinity,
+          height: 54,
+          child: ElevatedButton(
+            onPressed: _loading ? null : _loginWithKnockId,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _cardColorElevated,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: const BorderSide(color: _borderColor),
+              ),
+            ),
+            child: _loading
+                ? const SizedBox(
+                    height: 22,
+                    width: 22,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Text(
+                    'LOG IN',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                      letterSpacing: 1,
+                    ),
+                  ),
+          ),
+        ),
+        const SizedBox(height: 20),
+        GestureDetector(
+          onTap: () => setState(() {
+            _isSignupMode = true;
+            _error = null;
+          }),
+          child: Text.rich(
+            TextSpan(
+              text: "Don't have an account? ",
+              style: const TextStyle(color: _subtleTextColor, fontSize: 14),
+              children: [
+                TextSpan(
+                  text: 'Sign up',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSignupStep() {
+    return Column(
+      key: const ValueKey('signup'),
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const KnockLogo(size: 90),
+        const SizedBox(height: 28),
+        const Text(
+          'Create Account',
           style: TextStyle(
             fontSize: 28,
             fontWeight: FontWeight.w900,
@@ -757,10 +972,31 @@ class _SetupScreenState extends State<SetupScreen> {
                   ),
           ),
         ),
+        const SizedBox(height: 20),
+        GestureDetector(
+          onTap: () => setState(() {
+            _isSignupMode = false;
+            _error = null;
+          }),
+          child: Text.rich(
+            TextSpan(
+              text: 'Already have an account? ',
+              style: const TextStyle(color: _subtleTextColor, fontSize: 14),
+              children: [
+                TextSpan(
+                  text: 'Log in',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ],
     );
   }
-
 
   Widget _buildIdCard() {
     return Column(
@@ -900,7 +1136,37 @@ class _HomeScreenState extends State<HomeScreen> {
     _listenForKnocks();
     _listenForConnections();
     // After successful login and when home loads: request permission, get FCM token, save to Supabase (real devices only).
-    requestFcmPermissionAndSaveToken();
+    _ensureFcmTokenSaved();
+  }
+
+  /// Tries to save FCM token, retries up to 3 times with delay if it fails.
+  Future<void> _ensureFcmTokenSaved() async {
+    if (kIsWeb) return;
+    for (int attempt = 1; attempt <= 3; attempt++) {
+      try {
+        await requestFcmPermissionAndSaveToken();
+        // Verify token was actually saved
+        final uid = _uid;
+        if (uid != null) {
+          final profile = await _sb
+              .from('profiles')
+              .select('fcm_token')
+              .eq('id', uid)
+              .maybeSingle();
+          final saved = profile?['fcm_token'] as String?;
+          if (saved != null && saved.isNotEmpty) {
+            debugPrint('FCM: Token verified in DB (attempt $attempt)');
+            return;
+          }
+          debugPrint('FCM: Token still null in DB after attempt $attempt');
+        }
+      } catch (e) {
+        debugPrint('FCM: _ensureFcmTokenSaved attempt $attempt error: $e');
+      }
+      if (attempt < 3) {
+        await Future.delayed(Duration(seconds: 2 * attempt));
+      }
+    }
   }
 
   @override
@@ -1212,7 +1478,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
 
       final friendId = profile['id'] as String;
-      await _sb.rpc('add_mutual_connection', params: {'friend_id': friendId});
+      await _sb.rpc('add_mutual_connection', params: {'p_friend_id': friendId});
 
       _loadFriends();
 
