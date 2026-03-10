@@ -1,3 +1,6 @@
+# Debug/scratch SQL files
+supabase/migrations/check_fcm_token.sql
+
 # Ignore Google Services config
 android/app/google-services.json
 

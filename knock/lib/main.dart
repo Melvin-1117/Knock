@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show HttpClient, ContentType;
 import 'dart:math';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -36,7 +37,6 @@ const _borderColor = Color(0xFF2C2C2C);
 const _subtleTextColor = Color(0xFF757575);
 const _mutedTextColor = Color(0xFF9E9E9E);
 
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -45,8 +45,9 @@ SupabaseClient get _sb => Supabase.instance.client;
 String? get _uid => _sb.auth.currentUser?.id;
 
 // For showing notifications when FCM message arrives (foreground + heads-up)
+// Channel ID bumped to v2 to force Android to recreate with correct importance
 const AndroidNotificationChannel _knockChannel = AndroidNotificationChannel(
-  'knock_channel',
+  'knock_channel_v2',
   'Knocks',
   description: 'Incoming knock notifications',
   importance: Importance.max,
@@ -121,14 +122,17 @@ Future<void> _initLocalNotifications() async {
   );
   await _localNotifications
       .resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin>()
+        AndroidFlutterLocalNotificationsPlugin
+      >()
       ?.createNotificationChannel(_knockChannel);
 }
 
 // FCM background handler
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  // The FCM payload now contains a `notification` field, so Android OS
+  // automatically shows the notification when the app is background or killed.
+  // Nothing to do here — handling it manually would cause a duplicate.
   await Firebase.initializeApp();
-  debugPrint('FCM: Handling a background message: ${message.messageId}');
 }
 
 /// Saves the current FCM token to the user's profile in Supabase (call when signed in).
@@ -208,6 +212,15 @@ class FcmHandler extends StatefulWidget {
 }
 
 class _FcmHandlerState extends State<FcmHandler> {
+  // Static dedup set: survives widget rebuilds / hot reloads so a message is
+  // never shown more than once regardless of how many times the widget is
+  // mounted.
+  static final Set<String> _handledFcmIds = {};
+
+  StreamSubscription<RemoteMessage>? _onMessageSub;
+  StreamSubscription<RemoteMessage>? _onOpenedSub;
+  StreamSubscription<String>? _onTokenRefreshSub;
+
   @override
   void initState() {
     super.initState();
@@ -216,28 +229,40 @@ class _FcmHandlerState extends State<FcmHandler> {
 
   Future<void> _initFcm() async {
     if (kIsWeb) return; // FCM not set up for web; use mobile for push
-    // Permission + get token + save are done after login in HomeScreen (requestFcmPermissionAndSaveToken).
-    // Here we only set up listeners for foreground messages and token refresh.
-    FirebaseMessaging.instance.onTokenRefresh.listen((_) {
+    // Permission + get token + save are done after login in HomeScreen
+    // (requestFcmPermissionAndSaveToken). Here we only wire up listeners.
+    _onTokenRefreshSub = FirebaseMessaging.instance.onTokenRefresh.listen((_) {
       debugPrint('FCM: Token refreshed');
       saveFcmTokenToSupabase();
     });
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      debugPrint('FCM: Foreground message: ${message.messageId}');
+    _onMessageSub = FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      final msgId = message.messageId ?? '';
+      if (msgId.isNotEmpty && _handledFcmIds.contains(msgId)) return;
+      if (msgId.isNotEmpty) _handledFcmIds.add(msgId);
+      debugPrint('FCM: Foreground message: $msgId');
       _showForegroundNotification(message);
     });
-    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+    _onOpenedSub = FirebaseMessaging.onMessageOpenedApp.listen((
+      RemoteMessage message,
+    ) {
       debugPrint('FCM: App opened from notification: ${message.messageId}');
     });
   }
 
+  @override
+  void dispose() {
+    _onMessageSub?.cancel();
+    _onOpenedSub?.cancel();
+    _onTokenRefreshSub?.cancel();
+    super.dispose();
+  }
+
   Future<void> _showForegroundNotification(RemoteMessage message) async {
-    final notification = message.notification;
-    final title = notification?.title ?? 'Knock';
-    final body = notification?.body ??
-        message.data['body'] ??
-        message.data['message'] ??
-        'New knock';
+    // Prefer the notification field (set by Edge Function); fall back to data.
+    final title =
+        message.notification?.title ?? message.data['title'] ?? 'Knock';
+    final body =
+        message.notification?.body ?? message.data['body'] ?? 'New knock';
     final details = AndroidNotificationDetails(
       _knockChannel.id,
       _knockChannel.name,
@@ -248,15 +273,20 @@ class _FcmHandlerState extends State<FcmHandler> {
       enableVibration: true,
       visibility: NotificationVisibility.public,
       category: AndroidNotificationCategory.message,
+      fullScreenIntent: true,
     );
+    // Content+time-slot ID: same knock arriving multiple times within 10 s
+    // maps to the same notification ID → Android replaces, not stacks.
+    final slot = DateTime.now().millisecondsSinceEpoch ~/ 10000;
+    final notifId =
+        ((title.hashCode ^ body.hashCode ^ slot) & 0x7FFFFFFF) % 100000;
     await _localNotifications.show(
-      message.hashCode % 100000,
+      notifId,
       title,
       body,
       NotificationDetails(android: details),
     );
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -276,37 +306,37 @@ class KnockApp extends StatelessWidget {
     return FcmHandler(
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: Colors.black,
-        colorScheme: ColorScheme.dark(
-          primary: Colors.white,
-          surface: _cardColor,
-          onSurface: Colors.white,
-        ),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Colors.black,
-          elevation: 0,
-          scrolledUnderElevation: 0,
-          surfaceTintColor: Colors.transparent,
-          iconTheme: IconThemeData(color: Colors.white),
-          titleTextStyle: TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.w900,
-            letterSpacing: 8,
-            fontSize: 22,
+        theme: ThemeData(
+          useMaterial3: true,
+          brightness: Brightness.dark,
+          scaffoldBackgroundColor: Colors.black,
+          colorScheme: ColorScheme.dark(
+            primary: Colors.white,
+            surface: _cardColor,
+            onSurface: Colors.white,
+          ),
+          appBarTheme: const AppBarTheme(
+            backgroundColor: Colors.black,
+            elevation: 0,
+            scrolledUnderElevation: 0,
+            surfaceTintColor: Colors.transparent,
+            iconTheme: IconThemeData(color: Colors.white),
+            titleTextStyle: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 8,
+              fontSize: 22,
+            ),
+          ),
+          snackBarTheme: SnackBarThemeData(
+            backgroundColor: _cardColorElevated,
+            contentTextStyle: const TextStyle(color: Colors.white),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            behavior: SnackBarBehavior.floating,
           ),
         ),
-        snackBarTheme: SnackBarThemeData(
-          backgroundColor: _cardColorElevated,
-          contentTextStyle: const TextStyle(color: Colors.white),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          behavior: SnackBarBehavior.floating,
-        ),
-      ),
         home: const AppGate(),
       ),
     );
@@ -354,15 +384,12 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _navigate() async {
-    // Run auth + profile check with no artificial delay
+    // Check existing session – no anonymous sign-in
+    bool isLoggedIn = false;
     bool hasProfile = false;
     try {
-      if (_uid == null) {
-        try {
-          await _sb.auth.signInAnonymously();
-        } catch (_) {}
-      }
-      if (_uid != null) {
+      isLoggedIn = _uid != null;
+      if (isLoggedIn) {
         final existing = await _sb
             .from('profiles')
             .select()
@@ -375,10 +402,19 @@ class _SplashScreenState extends State<SplashScreen> {
     }
 
     if (!mounted) return;
+
+    Widget destination;
+    if (!isLoggedIn) {
+      destination = const AuthScreen();
+    } else if (hasProfile) {
+      destination = const HomeScreen();
+    } else {
+      destination = SetupScreen(onComplete: () {});
+    }
+
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
-        pageBuilder: (_, __, ___) =>
-            hasProfile ? const HomeScreen() : SetupScreen(onComplete: () {}),
+        pageBuilder: (_, __, ___) => destination,
         transitionsBuilder: (_, anim, __, child) =>
             FadeTransition(opacity: anim, child: child),
         transitionDuration: const Duration(milliseconds: 300),
@@ -394,9 +430,7 @@ class _SplashScreenState extends State<SplashScreen> {
       body: Stack(
         children: [
           // Logo centered on screen
-          const Center(
-            child: KnockLogo(size: 120),
-          ),
+          const Center(child: KnockLogo(size: 120)),
           // App name at the bottom
           const Positioned(
             left: 0,
@@ -421,6 +455,497 @@ class _SplashScreenState extends State<SplashScreen> {
 }
 
 // ===========================================================================
+//  AUTH SCREEN – sign up / sign in with email & password
+// ===========================================================================
+
+class AuthScreen extends StatefulWidget {
+  const AuthScreen({super.key});
+  @override
+  State<AuthScreen> createState() => _AuthScreenState();
+}
+
+class _AuthScreenState extends State<AuthScreen>
+    with SingleTickerProviderStateMixin {
+  bool _isSignUp = true; // true = sign-up mode, false = sign-in mode
+  final _usernameC = TextEditingController();
+  final _emailC = TextEditingController();
+  final _passwordC = TextEditingController();
+  bool _loading = false;
+  String? _error;
+  bool _obscurePassword = true;
+
+  Future<void> _submit() async {
+    final email = _emailC.text.trim();
+    final password = _passwordC.text.trim();
+
+    if (email.isEmpty || password.isEmpty) {
+      setState(() => _error = 'Please fill in all fields');
+      return;
+    }
+    if (_isSignUp && _usernameC.text.trim().isEmpty) {
+      setState(() => _error = 'Please enter a username');
+      return;
+    }
+    if (password.length < 6) {
+      setState(() => _error = 'Password must be at least 6 characters');
+      return;
+    }
+
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    try {
+      if (_isSignUp) {
+        // ---- SIGN UP ----
+        final res = await _sb.auth.signUp(email: email, password: password);
+        // Some Supabase configs require email confirmation;
+        // try immediate sign-in if session is null.
+        if (res.session == null && res.user != null) {
+          await _sb.auth.signInWithPassword(email: email, password: password);
+        }
+        final uid = _uid;
+        if (uid == null) {
+          setState(() {
+            _error = 'Could not create account. Please try again.';
+            _loading = false;
+          });
+          return;
+        }
+
+        // Create profile immediately
+        final name = _usernameC.text.trim();
+        final userId = _generateUserId();
+        final rndSuffix = Random().nextInt(99999).toString().padLeft(5, '0');
+        await _sb.from('profiles').insert({
+          'id': uid,
+          'username':
+              '${name.toLowerCase().replaceAll(RegExp(r'\s+'), '_')}_$rndSuffix',
+          'display_name': name,
+          'knock_code': userId,
+        });
+
+        if (!mounted) return;
+        // Go to SetupScreen to show the Knock ID card
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (_) => _KnockIdRevealScreen(knockId: userId),
+          ),
+        );
+      } else {
+        // ---- SIGN IN ----
+        await _sb.auth.signInWithPassword(email: email, password: password);
+        final uid = _uid;
+        if (uid == null) {
+          setState(() {
+            _error = 'Sign in failed. Check your credentials.';
+            _loading = false;
+          });
+          return;
+        }
+
+        // Check if profile exists
+        final existing = await _sb
+            .from('profiles')
+            .select()
+            .eq('id', uid)
+            .maybeSingle();
+
+        if (!mounted) return;
+        if (existing != null) {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (_) => const HomeScreen()),
+          );
+        } else {
+          // Profile missing – send to setup
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (_) => SetupScreen(onComplete: () {})),
+          );
+        }
+      }
+    } on AuthException catch (e) {
+      setState(() {
+        _error = e.message;
+        _loading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = 'Something went wrong. Please try again.';
+        _loading = false;
+      });
+      debugPrint('Auth error: $e');
+    }
+  }
+
+  @override
+  void dispose() {
+    _usernameC.dispose();
+    _emailC.dispose();
+    _passwordC.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF000000),
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const KnockLogo(size: 80),
+                const SizedBox(height: 20),
+                Text(
+                  _isSignUp ? 'Create Account' : 'Welcome Back',
+                  style: const TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.w900,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  _isSignUp
+                      ? 'Sign up to start knocking'
+                      : 'Sign in to continue',
+                  style: const TextStyle(fontSize: 15, color: _mutedTextColor),
+                ),
+                const SizedBox(height: 32),
+
+                // ---- USERNAME (sign-up only) ----
+                if (_isSignUp) ...[
+                  _buildTextField(
+                    controller: _usernameC,
+                    hint: 'Username',
+                    icon: Icons.person_outline,
+                    capitalization: TextCapitalization.words,
+                  ),
+                  const SizedBox(height: 14),
+                ],
+
+                // ---- EMAIL ----
+                _buildTextField(
+                  controller: _emailC,
+                  hint: 'Email',
+                  icon: Icons.email_outlined,
+                  keyboardType: TextInputType.emailAddress,
+                ),
+                const SizedBox(height: 14),
+
+                // ---- PASSWORD ----
+                _buildTextField(
+                  controller: _passwordC,
+                  hint: 'Password',
+                  icon: Icons.lock_outline,
+                  obscure: _obscurePassword,
+                  suffix: IconButton(
+                    icon: Icon(
+                      _obscurePassword
+                          ? Icons.visibility_off_outlined
+                          : Icons.visibility_outlined,
+                      color: _subtleTextColor,
+                      size: 20,
+                    ),
+                    onPressed: () =>
+                        setState(() => _obscurePassword = !_obscurePassword),
+                  ),
+                ),
+
+                // ---- ERROR ----
+                if (_error != null) ...[
+                  const SizedBox(height: 14),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.redAccent.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: Colors.redAccent.withOpacity(0.3),
+                      ),
+                    ),
+                    child: Text(
+                      _error!,
+                      style: const TextStyle(
+                        color: Colors.redAccent,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                ],
+
+                const SizedBox(height: 24),
+
+                // ---- SUBMIT BUTTON ----
+                SizedBox(
+                  width: double.infinity,
+                  height: 54,
+                  child: ElevatedButton(
+                    onPressed: _loading ? null : _submit,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: Colors.black,
+                      disabledBackgroundColor: Colors.white.withOpacity(0.3),
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                    child: _loading
+                        ? const SizedBox(
+                            height: 22,
+                            width: 22,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.5,
+                              color: Colors.black,
+                            ),
+                          )
+                        : Text(
+                            _isSignUp ? 'SIGN UP' : 'SIGN IN',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 16,
+                              letterSpacing: 1.5,
+                            ),
+                          ),
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                // ---- TOGGLE SIGN UP / SIGN IN ----
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      _isSignUp
+                          ? 'Already have an account?'
+                          : "Don't have an account?",
+                      style: const TextStyle(
+                        color: _mutedTextColor,
+                        fontSize: 14,
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        setState(() {
+                          _isSignUp = !_isSignUp;
+                          _error = null;
+                        });
+                      },
+                      child: Text(
+                        _isSignUp ? 'Sign In' : 'Sign Up',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTextField({
+    required TextEditingController controller,
+    required String hint,
+    required IconData icon,
+    TextInputType keyboardType = TextInputType.text,
+    TextCapitalization capitalization = TextCapitalization.none,
+    bool obscure = false,
+    Widget? suffix,
+  }) {
+    return TextField(
+      controller: controller,
+      keyboardType: keyboardType,
+      textCapitalization: capitalization,
+      obscureText: obscure,
+      style: const TextStyle(
+        fontSize: 16,
+        fontWeight: FontWeight.w500,
+        color: Colors.white,
+      ),
+      decoration: InputDecoration(
+        hintText: hint,
+        hintStyle: const TextStyle(
+          color: _subtleTextColor,
+          fontWeight: FontWeight.normal,
+        ),
+        filled: true,
+        fillColor: _cardColor,
+        prefixIcon: Icon(icon, color: _mutedTextColor, size: 20),
+        suffixIcon: suffix,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 16,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: _borderColor),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: _borderColor),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: Colors.white, width: 1.5),
+        ),
+      ),
+    );
+  }
+}
+
+// ===========================================================================
+//  KNOCK ID REVEAL – shown after sign-up to display generated Knock ID
+// ===========================================================================
+
+class _KnockIdRevealScreen extends StatelessWidget {
+  final String knockId;
+  const _KnockIdRevealScreen({required this.knockId});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF000000),
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    color: _cardColorElevated,
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(color: _borderColor),
+                  ),
+                  child: const Icon(
+                    Icons.check_circle_rounded,
+                    size: 44,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                const Text(
+                  "You're all set!",
+                  style: TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.w900,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  "Here's your personal Knock ID.\nShare it with friends to connect!",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 15,
+                    color: _mutedTextColor,
+                    height: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 32),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 24),
+                  decoration: BoxDecoration(
+                    color: _cardColor,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: _borderColor),
+                  ),
+                  child: Column(
+                    children: [
+                      const Text(
+                        'YOUR KNOCK ID',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 3,
+                          color: _subtleTextColor,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        knockId,
+                        style: const TextStyle(
+                          fontSize: 36,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 4,
+                          color: _primaryColor,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      TextButton.icon(
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: knockId));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Knock ID copied!'),
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.copy_rounded, size: 18),
+                        label: const Text('Copy ID'),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 32),
+                SizedBox(
+                  width: double.infinity,
+                  height: 54,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      Navigator.of(context).pushReplacement(
+                        MaterialPageRoute(builder: (_) => const HomeScreen()),
+                      );
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: Colors.black,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                    child: const Text(
+                      'CONTINUE',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ===========================================================================
 //  APP GATE - checks if profile exists, shows setup or home
 // ===========================================================================
 
@@ -432,6 +957,7 @@ class AppGate extends StatefulWidget {
 
 class _AppGateState extends State<AppGate> {
   bool _checking = true;
+  bool _isLoggedIn = false;
   bool _hasProfile = false;
 
   @override
@@ -442,18 +968,14 @@ class _AppGateState extends State<AppGate> {
 
   Future<void> _init() async {
     if (_uid != null) {
+      _isLoggedIn = true;
       await _checkProfile();
       return;
     }
-    try {
-      await _sb.auth.signInAnonymously();
-      if (_uid != null) {
-        await _checkProfile();
-        return;
-      }
-    } catch (_) {}
+    // Not logged in – show auth screen
     setState(() {
       _checking = false;
+      _isLoggedIn = false;
       _hasProfile = false;
     });
   }
@@ -515,6 +1037,7 @@ class _AppGateState extends State<AppGate> {
         ),
       );
     }
+    if (!_isLoggedIn) return const AuthScreen();
     if (_hasProfile) return const HomeScreen();
     return SetupScreen(onComplete: () => setState(() => _hasProfile = true));
   }
@@ -622,10 +1145,10 @@ class _SetupScreenState extends State<SetupScreen> {
       return;
     }
     setState(() => _error = null);
-    await _createAccount();
+    await _createProfile();
   }
 
-  Future<void> _createAccount() async {
+  Future<void> _createProfile() async {
     final name = _usernameC.text.trim();
     setState(() {
       _loading = true;
@@ -633,37 +1156,10 @@ class _SetupScreenState extends State<SetupScreen> {
     });
 
     try {
-      if (_uid == null) {
-        final tag = name.toLowerCase().replaceAll(RegExp(r'\s+'), '_');
-        final rnd = Random().nextInt(99999).toString().padLeft(5, '0');
-        final email = 'knock_${tag}_$rnd@knock.app';
-        const pass = 'KnockAutoPass2026!';
-
-        try {
-          final res = await _sb.auth.signUp(
-            email: email,
-            password: pass,
-            emailRedirectTo: null,
-          );
-          if (res.session == null && res.user != null) {
-            try {
-              await _sb.auth.signInWithPassword(email: email, password: pass);
-            } catch (_) {}
-          }
-        } catch (e) {
-          debugPrint('SignUp error: $e');
-          try {
-            final rnd2 = Random().nextInt(99999).toString().padLeft(5, '0');
-            final email2 = 'knock_${tag}_$rnd2@knock.app';
-            await _sb.auth.signUp(email: email2, password: pass);
-          } catch (_) {}
-        }
-      }
-
       final uid = _uid;
       if (uid == null) {
         setState(() {
-          _error = 'Could not create account. Check your connection.';
+          _error = 'Not signed in. Please go back and sign in first.';
           _loading = false;
         });
         return;
@@ -723,7 +1219,7 @@ class _SetupScreenState extends State<SetupScreen> {
       });
     } catch (e) {
       setState(() {
-        _error = 'Something went wrong. Try again.';
+        _error = 'Error: $e';
         _loading = false;
       });
       debugPrint('Setup error: $e');
@@ -916,7 +1412,10 @@ class _SetupScreenState extends State<SetupScreen> {
             ),
             filled: true,
             fillColor: _cardColor,
-            prefixIcon: const Icon(Icons.person_outline, color: _mutedTextColor),
+            prefixIcon: const Icon(
+              Icons.person_outline,
+              color: _mutedTextColor,
+            ),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(16),
               borderSide: const BorderSide(color: _borderColor),
@@ -1030,7 +1529,11 @@ class _SetupScreenState extends State<SetupScreen> {
         Text(
           "Here's your personal Knock ID.\nShare it with friends to connect!",
           textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 15, color: _mutedTextColor, height: 1.5),
+          style: const TextStyle(
+            fontSize: 15,
+            color: _mutedTextColor,
+            height: 1.5,
+          ),
         ),
         const SizedBox(height: 32),
         Container(
@@ -1127,12 +1630,15 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _myKnockId;
   String? _myDisplayName;
   String? _myAvatarEmoji;
+  bool _myIsFounder = false;
+  Map<String, String> _nicknames = {}; // local nickname overrides
+  final Set<String> _handledKnockIds = {}; // dedup realtime knock events
 
   @override
   void initState() {
     super.initState();
     _loadProfile();
-    _loadFriends();
+    _loadNicknames().then((_) => _loadFriends());
     _listenForKnocks();
     _listenForConnections();
     // After successful login and when home loads: request permission, get FCM token, save to Supabase (real devices only).
@@ -1167,6 +1673,145 @@ class _HomeScreenState extends State<HomeScreen> {
         await Future.delayed(Duration(seconds: 2 * attempt));
       }
     }
+  }
+
+  // ---- Local nickname helpers ----
+
+  Future<void> _loadNicknames() async {
+    final prefs = await SharedPreferences.getInstance();
+    final keys = prefs.getKeys().where((k) => k.startsWith('nickname_'));
+    final map = <String, String>{};
+    for (final k in keys) {
+      map[k.replaceFirst('nickname_', '')] = prefs.getString(k) ?? '';
+    }
+    _nicknames = map;
+  }
+
+  Future<void> _saveNickname(String friendId, String nickname) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (nickname.isEmpty) {
+      await prefs.remove('nickname_$friendId');
+      _nicknames.remove(friendId);
+    } else {
+      await prefs.setString('nickname_$friendId', nickname);
+      _nicknames[friendId] = nickname;
+    }
+    setState(() {});
+  }
+
+  String _displayName(Map<String, dynamic> f) {
+    final friendId = f['friend_id'] as String;
+    if (_nicknames.containsKey(friendId) && _nicknames[friendId]!.isNotEmpty) {
+      return _nicknames[friendId]!;
+    }
+    final profile = f['profiles'] as Map<String, dynamic>? ?? {};
+    return profile['display_name'] ?? profile['username'] ?? 'Unknown';
+  }
+
+  void _showRenameDialog(String friendId, String currentName) {
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        final controller = TextEditingController(
+          text: _nicknames[friendId] ?? '',
+        );
+        return StatefulBuilder(
+          builder: (ctx2, setDialogState) {
+            return AlertDialog(
+              backgroundColor: _cardColorElevated,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              title: const Text(
+                'Set Nickname',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Customize how "$currentName" appears on your device.',
+                      style: const TextStyle(
+                        color: _mutedTextColor,
+                        fontSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: controller,
+                      autofocus: true,
+                      style: const TextStyle(color: Colors.white, fontSize: 16),
+                      decoration: InputDecoration(
+                        hintText: currentName,
+                        hintStyle: const TextStyle(color: _subtleTextColor),
+                        filled: true,
+                        fillColor: _cardColor,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: _borderColor),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: _borderColor),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: Colors.white,
+                            width: 1.5,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    _saveNickname(friendId, '');
+                    Navigator.pop(ctx);
+                  },
+                  child: const Text(
+                    'Reset',
+                    style: TextStyle(color: _mutedTextColor),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text(
+                    'Cancel',
+                    style: TextStyle(color: _mutedTextColor),
+                  ),
+                ),
+                ElevatedButton(
+                  onPressed: () {
+                    _saveNickname(friendId, controller.text.trim());
+                    Navigator.pop(ctx);
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: Colors.black,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  child: const Text(
+                    'Save',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   @override
@@ -1217,6 +1862,7 @@ class _HomeScreenState extends State<HomeScreen> {
           _myKnockId = row['knock_code'] as String?;
           _myDisplayName = row['display_name'] as String?;
           _myAvatarEmoji = row['avatar_emoji'] as String?;
+          _myIsFounder = row['is_founder'] == true;
         });
       }
     } catch (e) {
@@ -1323,21 +1969,21 @@ class _HomeScreenState extends State<HomeScreen> {
         .listen((rows) {
           if (rows.isNotEmpty) {
             final latest = rows.last;
+            final knockId = latest['id']?.toString() ?? '';
+            // Deduplicate: stream can emit multiple times for the same knock
+            if (knockId.isEmpty || _handledKnockIds.contains(knockId)) return;
             final createdAt = DateTime.tryParse(latest['created_at'] ?? '');
             if (createdAt != null &&
                 DateTime.now().toUtc().difference(createdAt).inSeconds < 5) {
+              _handledKnockIds.add(knockId);
               HapticFeedback.heavyImpact();
               if (mounted) {
-                // Look up sender name from friends list
+                // Look up sender name from friends list (prefer local nickname)
                 final senderId = latest['sender_id'] as String?;
                 String senderName = 'Someone';
                 for (final f in _friends) {
                   if (f['friend_id'] == senderId) {
-                    final profile =
-                        f['profiles'] as Map<String, dynamic>? ?? {};
-                    senderName = profile['display_name'] ??
-                        profile['username'] ??
-                        'Someone';
+                    senderName = _displayName(f);
                     break;
                   }
                 }
@@ -1418,7 +2064,10 @@ class _HomeScreenState extends State<HomeScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel', style: TextStyle(color: _mutedTextColor)),
+              child: const Text(
+                'Cancel',
+                style: TextStyle(color: _mutedTextColor),
+              ),
             ),
             ElevatedButton(
               onPressed: () => Navigator.pop(ctx, c.text.trim().toUpperCase()),
@@ -1545,13 +2194,44 @@ class _HomeScreenState extends State<HomeScreen> {
                     crossAxisAlignment: CrossAxisAlignment.end,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        _myDisplayName ?? 'User',
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white,
-                        ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _myDisplayName ?? 'User',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                            ),
+                          ),
+                          if (_myIsFounder) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.amber.withOpacity(0.15),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                  color: Colors.amber,
+                                  width: 1,
+                                ),
+                              ),
+                              child: const Text(
+                                'FOUNDER',
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w900,
+                                  color: Colors.amber,
+                                  letterSpacing: 1.5,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                       if (_myKnockId != null)
                         Text(
@@ -1612,11 +2292,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 separatorBuilder: (_, __) => const SizedBox(height: 10),
                 itemBuilder: (context, index) {
                   final f = _friends[index];
-                  final profile = f['profiles'] as Map<String, dynamic>? ?? {};
-                  final name =
-                      profile['display_name'] ??
-                      profile['username'] ??
-                      'Unknown';
+                  final name = _displayName(f);
                   final label = f['label'] ?? 'Friend';
                   final friendId = f['friend_id'] as String;
                   final color = _colorForIndex(index);
@@ -1625,6 +2301,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   final lastAt = lastAtStr != null
                       ? DateTime.tryParse(lastAtStr)
                       : null;
+                  // Original name from server (for rename dialog context)
+                  final profile = f['profiles'] as Map<String, dynamic>? ?? {};
+                  final originalName =
+                      profile['display_name'] ??
+                      profile['username'] ??
+                      'Unknown';
 
                   return _FriendCard(
                     name: name,
@@ -1634,6 +2316,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     lastMessage: lastMsg,
                     lastMessageAt: lastAt,
                     onRemove: () => _confirmRemoveFriend(friendId, name),
+                    onRename: () =>
+                        _showRenameDialog(friendId, originalName as String),
                   );
                 },
               ),
@@ -1653,10 +2337,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           title: const Text(
             'Remove friend?',
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
+            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
           ),
           content: Text(
             'This will remove $name from your friends list.',
@@ -1695,7 +2376,10 @@ class _HomeScreenState extends State<HomeScreen> {
     final uid = _uid;
     if (uid == null) return;
     try {
-      await _sb.rpc('remove_mutual_connection', params: {'p_friend_id': friendId});
+      await _sb.rpc(
+        'remove_mutual_connection',
+        params: {'p_friend_id': friendId},
+      );
       setState(() {
         _friends.removeWhere((f) => f['friend_id'] == friendId);
       });
@@ -1833,6 +2517,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _nameC = TextEditingController();
   String? _knockId;
   String? _avatarEmoji;
+  bool _isFounder = false;
   bool _loading = true;
   bool _saving = false;
 
@@ -1862,6 +2547,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _nameC.text = row['display_name'] as String? ?? '';
           _knockId = row['knock_code'] as String?;
           _avatarEmoji = row['avatar_emoji'] as String?;
+          _isFounder = row['is_founder'] == true;
           _loading = false;
         });
       } else {
@@ -2013,6 +2699,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
             const SizedBox(height: 8),
+            if (_isFounder)
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 4,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.amber.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.amber, width: 1),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.star_rounded, color: Colors.amber, size: 14),
+                    SizedBox(width: 5),
+                    Text(
+                      'FOUNDER',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w900,
+                        color: Colors.amber,
+                        letterSpacing: 2,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 8),
             const Text(
               'Tap an avatar below to change',
               style: TextStyle(fontSize: 13, color: _mutedTextColor),
@@ -2043,7 +2758,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
               decoration: InputDecoration(
                 filled: true,
                 fillColor: _cardColor,
-                prefixIcon: const Icon(Icons.person_outline, color: _mutedTextColor),
+                prefixIcon: const Icon(
+                  Icons.person_outline,
+                  color: _mutedTextColor,
+                ),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
                   borderSide: const BorderSide(color: _borderColor),
@@ -2156,9 +2874,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                     : _cardColor,
                                 shape: BoxShape.circle,
                                 border: Border.all(
-                                  color: selected
-                                      ? Colors.white
-                                      : _borderColor,
+                                  color: selected ? Colors.white : _borderColor,
                                   width: selected ? 2.5 : 1.5,
                                 ),
                                 boxShadow: selected
@@ -2223,6 +2939,7 @@ class _FriendCard extends StatelessWidget {
     this.lastMessage,
     this.lastMessageAt,
     required this.onRemove,
+    this.onRename,
   });
 
   final String name;
@@ -2232,6 +2949,7 @@ class _FriendCard extends StatelessWidget {
   final String? lastMessage;
   final DateTime? lastMessageAt;
   final VoidCallback onRemove;
+  final VoidCallback? onRename;
 
   @override
   Widget build(BuildContext context) {
@@ -2251,6 +2969,7 @@ class _FriendCard extends StatelessWidget {
           ),
         );
       },
+      onLongPress: onRename,
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
@@ -2288,7 +3007,10 @@ class _FriendCard extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(
                     subtitle,
-                    style: const TextStyle(fontSize: 13, color: _mutedTextColor),
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: _mutedTextColor,
+                    ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -2345,6 +3067,7 @@ class _UserDetailScreenState extends State<UserDetailScreen> {
   List<String> _customKnocks = [];
   final _newKnockC = TextEditingController();
   int _sendingIndex = -1;
+  bool _isSending = false;
 
   @override
   void initState() {
@@ -2461,14 +3184,39 @@ class _UserDetailScreenState extends State<UserDetailScreen> {
 
   Future<void> _sendKnock(String message, int tileIndex) async {
     final uid = _uid;
-    if (uid == null || message.isEmpty) return;
-    setState(() => _sendingIndex = tileIndex);
+    if (uid == null || message.isEmpty || _isSending) return;
+    setState(() {
+      _isSending = true;
+      _sendingIndex = tileIndex;
+    });
     HapticFeedback.heavyImpact();
     try {
-      await _sb.rpc('send_knock_safe', params: {
-        'p_receiver_id': widget.friendId,
-        'p_message': message,
-      });
+      await _sb.rpc(
+        'send_knock_safe',
+        params: {'p_receiver_id': widget.friendId, 'p_message': message},
+      );
+      // Trigger FCM push notification via Edge Function (direct HTTP to bypass JWT issues)
+      try {
+        final httpClient = HttpClient();
+        final request = await httpClient.postUrl(
+          Uri.parse('$_supabaseUrl/functions/v1/send-knock-push'),
+        );
+        request.headers.set('Content-Type', 'application/json');
+        request.headers.set('Authorization', 'Bearer $_supabaseAnonKey');
+        request.write(
+          jsonEncode({
+            'sender_id': uid,
+            'receiver_id': widget.friendId,
+            'message': message,
+          }),
+        );
+        final response = await request.close();
+        final responseBody = await response.transform(utf8.decoder).join();
+        debugPrint('Push response: ${response.statusCode} $responseBody');
+        httpClient.close();
+      } catch (pushErr) {
+        debugPrint('Push notification error (non-fatal): $pushErr');
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).clearSnackBars();
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2497,13 +3245,21 @@ class _UserDetailScreenState extends State<UserDetailScreen> {
       }
     } catch (e) {
       debugPrint('Send error: $e');
+      if (mounted)
+        setState(() {
+          _isSending = false;
+          _sendingIndex = -1;
+        });
       final errorStr = e.toString().toLowerCase();
       if (mounted && errorStr.contains('no connection exists')) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: const Text(
               'This user is no longer in your friends list',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
             ),
             backgroundColor: _cardColorElevated,
             behavior: SnackBarBehavior.floating,
@@ -2517,13 +3273,17 @@ class _UserDetailScreenState extends State<UserDetailScreen> {
         return;
       }
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to send: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to send: $e')));
       }
     }
     await Future.delayed(const Duration(milliseconds: 250));
-    if (mounted) setState(() => _sendingIndex = -1);
+    if (mounted)
+      setState(() {
+        _isSending = false;
+        _sendingIndex = -1;
+      });
   }
 
   // ---- UI ----
@@ -2593,9 +3353,7 @@ class _UserDetailScreenState extends State<UserDetailScreen> {
                         child: Material(
                           color: Colors.transparent,
                           child: InkWell(
-                            onTap: isSending
-                                ? null
-                                : () => _sendKnock(msg, i),
+                            onTap: isSending ? null : () => _sendKnock(msg, i),
                             onLongPress: () => _removeKnock(i),
                             borderRadius: BorderRadius.circular(14),
                             child: Container(
@@ -2652,9 +3410,7 @@ class _UserDetailScreenState extends State<UserDetailScreen> {
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
             decoration: const BoxDecoration(
               color: _cardColor,
-              border: Border(
-                top: BorderSide(color: _borderColor, width: 1),
-              ),
+              border: Border(top: BorderSide(color: _borderColor, width: 1)),
             ),
             child: SafeArea(
               top: false,
@@ -2663,10 +3419,7 @@ class _UserDetailScreenState extends State<UserDetailScreen> {
                   Expanded(
                     child: TextField(
                       controller: _newKnockC,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                      ),
+                      style: const TextStyle(color: Colors.white, fontSize: 15),
                       textInputAction: TextInputAction.done,
                       onSubmitted: (_) => _addKnock(),
                       decoration: InputDecoration(

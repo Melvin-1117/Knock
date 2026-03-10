@@ -105,14 +105,17 @@ async function sendFcm(
     body: JSON.stringify({
       message: {
         token: fcmToken,
+        // notification field: Android OS shows this automatically when app is
+        // background or killed — no Flutter code needed for those states.
         notification: { title, body },
+        // data field: available in onMessage (foreground) for the Flutter
+        // foreground handler to build its local notification.
+        data: { title, body },
         android: {
           priority: "high",
           notification: {
-            channel_id: "knock_channel",
-            notification_priority: "PRIORITY_MAX",
-            default_sound: true,
-            default_vibrate_timings: true,
+            channel_id: "knock_channel_v2",
+            sound: "default",
           },
         },
       },
@@ -124,6 +127,10 @@ async function sendFcm(
   }
 }
 
+// Module-level rate-limit (per Deno instance, guards same-instance duplicates).
+// DB-level dedup (push_sent) guards across instances.
+const _recentlySent = new Map<string, number>();
+
 Deno.serve(async (req) => {
   try {
     if (req.method !== "POST") {
@@ -133,18 +140,40 @@ Deno.serve(async (req) => {
       });
     }
 
-    const payload: WebhookPayload = await req.json();
-    if (payload.type !== "INSERT" || payload.table !== "knocks") {
-      return new Response(
-        JSON.stringify({ ok: true, skipped: "not a knock insert" }),
-        { status: 200, headers: { "Content-Type": "application/json" } }
-      );
+    const body = await req.json();
+
+    // Support both webhook payloads and direct invocations
+    let sender_id: string;
+    let receiver_id: string;
+    let message: string;
+
+    if (body.record) {
+      // Database Webhook payload
+      if (body.type !== "INSERT" || body.table !== "knocks") {
+        return new Response(
+          JSON.stringify({ ok: true, skipped: "not a knock insert" }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      sender_id = body.record.sender_id;
+      receiver_id = body.record.receiver_id;
+      message = body.record.message;
+    } else {
+      // Direct invocation from client
+      sender_id = body.sender_id;
+      receiver_id = body.receiver_id;
+      message = body.message ?? "Knock!";
     }
 
-    const { sender_id, receiver_id, message } = payload.record;
+    if (!sender_id || !receiver_id) {
+      return new Response(
+        JSON.stringify({ error: "sender_id and receiver_id are required" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
     const serviceAccountJson = Deno.env.get("FIREBASE_SERVICE_ACCOUNT_JSON");
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const serviceRoleKey = Deno.env.get("SB_SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
     if (!serviceAccountJson) {
       console.error("FIREBASE_SERVICE_ACCOUNT_JSON not set");
@@ -154,12 +183,80 @@ Deno.serve(async (req) => {
       );
     }
 
-    const supabase = createClient(supabaseUrl, serviceRoleKey);
+    const supabase = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+      global: { headers: { Authorization: `Bearer ${serviceRoleKey}` } },
+    });
 
-    const [{ data: receiverProfile }, { data: senderProfile }] = await Promise.all([
+    // ── Layer 1: module-level rate-limit (same Deno instance) ───────────────
+    const dedupKey = `${sender_id}:${receiver_id}`;
+    const lastSentMs = _recentlySent.get(dedupKey) ?? 0;
+    if (Date.now() - lastSentMs < 8000) {
+      return new Response(
+        JSON.stringify({ ok: true, skipped: "rate limited (module)" }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    // ── Layer 2: DB-level dedup via push_sent column ─────────────────────────
+    // Find the most recent un-notified knock for this pair (last 60 s).
+    const cutoff = new Date(Date.now() - 60_000).toISOString();
+    const { data: pending, error: pendingErr } = await supabase
+      .from("knocks")
+      .select("id")
+      .eq("sender_id", sender_id)
+      .eq("receiver_id", receiver_id)
+      .eq("push_sent", false)
+      .gte("created_at", cutoff)
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (pendingErr) {
+      // push_sent column may not exist or permission missing — log and fall
+      // through so the notification is still delivered (module-level dedup
+      // above covers same-instance duplicates).
+      console.error("push_sent query error:", JSON.stringify(pendingErr));
+    } else if (!pending || pending.length === 0) {
+      return new Response(
+        JSON.stringify({ ok: true, skipped: "no pending knock to notify" }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    } else {
+      // Atomically claim the knock. If another instance already flipped
+      // push_sent, the UPDATE matches 0 rows and we bail out.
+      const { data: claimed, error: claimErr } = await supabase
+        .from("knocks")
+        .update({ push_sent: true })
+        .eq("id", pending[0].id)
+        .eq("push_sent", false)
+        .select("id");
+
+      if (claimErr) {
+        console.error("push_sent claim error:", JSON.stringify(claimErr));
+        // Fall through — module-level dedup is our safety net.
+      } else if (!claimed || claimed.length === 0) {
+        return new Response(
+          JSON.stringify({ ok: true, skipped: "push already sent for this knock" }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+    }
+
+    // Mark in module-level map so same-instance duplicates are blocked.
+    _recentlySent.set(dedupKey, Date.now());
+    // Clean up stale entries to avoid memory growth.
+    for (const [k, t] of _recentlySent) {
+      if (Date.now() - t > 120_000) _recentlySent.delete(k);
+    }
+    // ── End dedup ────────────────────────────────────────────────────────────
+
+    const [receiverResult, senderResult] = await Promise.all([
       supabase.from("profiles").select("fcm_token").eq("id", receiver_id).single(),
       supabase.from("profiles").select("display_name").eq("id", sender_id).single(),
     ]);
+
+    const receiverProfile = receiverResult.data;
+    const senderProfile = senderResult.data;
 
     const fcmToken = (receiverProfile as ProfilesRow | null)?.fcm_token;
     if (!fcmToken || typeof fcmToken !== "string") {
